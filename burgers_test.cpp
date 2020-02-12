@@ -52,21 +52,91 @@ stencil_function advection
   }
 };
 
-stencil horizontal_diffusion_type2_stencil
+stencil_function diffusion_x
 {
-  storage out, in, crlato, crlatu, hdmask;
-  var lap;
-
+  storage dx, phi;
+  var diff_phi;
   Do
   {
-    vertical_region(k_start, k_end)
-    {
-      lap = laplacian(in, crlato, crlatu);
-      const double delta_flux_x = diffusive_flux_x(lap, in) -
-                                  diffusive_flux_x(lap(i - 1), in(i - 1));
-      const double delta_flux_y = diffusive_flux_y(lap, in, crlato) -
-                                  diffusive_flux_y(lap(j - 1), in(j - 1), crlato(j - 1));
-      out = in - hdmask * (delta_flux_x + delta_flux_y);
-    }
+    diff_phi = (-phi[i-2]
+                       + 16. * phi[i-1]
+                       - 30. * phi
+                       + 16. * phi[i+1]
+                       - phi[i+2]
+               ) / (12. * dx * dx);
+    return diff_phi
+  }
+};
+
+stencil_function diffusion_x
+{
+  storage dx, phi;
+  var diff_phi;
+  Do
+  {
+    diff_phi = (-phi[i-2]
+                       + 16. * phi[i-1]
+                       - 30. * phi
+                       + 16. * phi[i+1]
+                       - phi[i+2]
+               ) / (12. * dx * dx);
+    return diff_phi;
+  }
+};
+
+stencil_function diffusion_y
+{
+  storage dy, phi;
+  var diff_phi;
+  Do
+  {
+    diff_phi = (
+                       -       phi[j-2]
+                       + 16. * phi[j-1]
+                       - 30. * phi
+                       + 16. * phi[j+1]
+                       - phi[j+2]
+               ) / (12. * dy * dy);
+    return diff_phi;
+  }
+};
+
+stencil_function diffusion
+{
+  storage dx, dy, u, v;
+  var diff_u_x, diff_u_y, diff_u, diff_v_x, diff_v_y, diff_v;
+  Do
+  {
+    diff_u_x = diffusion_x(dx, u)
+    diff_u_y = diffusion_y(dy, u)
+    diff_u = diff_u_x + diff_u_y;
+
+    diff_v_x = diffusion_x(dx, v);
+    diff_v_y = diffusion_y(dy, v);
+    diff_v = diff_v_x + diff_v_y;
+
+    return (diff_u, diff_v);
+  }
+};
+
+stencil rk_stage
+{
+  storage in_u_now, in_v_now, in_u_tmp, in_v_tmp, out_u, out_v;
+  var dt, dx, dy, mu;
+  vertical_region(k_start, k_end)
+  {
+    (adv_u, adv_v) = advection(dx, dy, in_u_tmp, in_v_tmp);
+    (diff_u, diff_v) = diffusion(dx, dy, in_u_tmp, in_v_tmp);
+    out_u = in_u_now + dt * (-adv_u + mu * diff_u);
+    out_v = in_v_now + dt * (-adv_v + mu * diff_v);
+  }
+};
+
+stencil copy
+{
+  storage in_phi, out_phi;
+  vertical_region(k_start, k_end)
+  {
+    out_phi = in_phi;
   }
 };

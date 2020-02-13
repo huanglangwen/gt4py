@@ -10,42 +10,38 @@ stencil_function absolute_value
 stencil_function advection_x
 {
   storage dx, u, abs_u, phi;
-  var adv_phi_x;
   Do
   {
-    adv_phi_x = u / (60. * dx) * (45. * (phi[i + 1] - phi[i - 1]) - 9. * (phi[i + 2] - phi[i - 2]) + (phi[i + 3] - phi[i - 3])) -
+    return u / (60. * dx) * (45. * (phi[i + 1] - phi[i - 1]) - 9. * (phi[i + 2] - phi[i - 2]) + (phi[i + 3] - phi[i - 3])) -
                 abs_u / (60. * dx) * ((phi[i + 3] + phi[i - 3]) - 6. * (phi[i + 2] + phi[i - 2]) + 15. * (phi[i + 1] + phi[i - 1]) - 20. * phi);
-    return adv_phi_x;
   }
 };
 
 stencil_function advection_y
 {
   storage dy, v, abs_v, phi;
-  var adv_phi_y;
   Do
   {
-    adv_phi_y = v / (60. * dy) * (45. * (phi[j + 1] - phi[j - 1]) - 9. * (phi[j + 2] - phi[j - 2]) + (phi[j + 3] - phi[j - 3])) -
+    return v / (60. * dy) * (45. * (phi[j + 1] - phi[j - 1]) - 9. * (phi[j + 2] - phi[j - 2]) + (phi[j + 3] - phi[j - 3])) -
                 abs_v / (60. * dy) * ((phi[j + 3] + phi[j - 3]) - 6. * (phi[j + 2] + phi[j - 2]) + 15. * (phi[j + 1] + phi[j - 1]) - 20. * phi);
-    return adv_phi_y;
   }
 };
 
 stencil_function advection
 {
   storage dx, dy, u, v;
-  var cabs_u, abs_v, adv_u_x, adv_u_y, adv_u;
+  storage abs_u, abs_v, adv_u_x, adv_u_y, adv_u, adv_v_x, adv_v_y, adv_v;
   Do
   {
-    cabs_u = absolute_value(u);
+    abs_u = absolute_value(u);
     abs_v = absolute_value(v);
 
     adv_u_x = advection_x(dx, u, abs_u, u);
     adv_u_y = advection_y(dy, v, abs_v, u);
     adv_u = adv_u_x + adv_u_y;
 
-    adv_v_x = advection_x(dx = dx, u = u, abs_u = abs_u, phi = v);
-    adv_v_y = advection_y(dy = dy, v = v, abs_v = abs_v, phi = v);
+    adv_v_x = advection_x(dx, u, abs_u, v);
+    adv_v_y = advection_y(dy, v, abs_v, v);
     adv_v = adv_v_x + adv_v_y;
 
     return (adv_u, adv_v);
@@ -55,60 +51,54 @@ stencil_function advection
 stencil_function diffusion_x
 {
   storage dx, phi;
-  var diff_phi;
   Do
   {
-    diff_phi = (-phi[i-2]
+    return (-phi[i-2]
                        + 16. * phi[i-1]
                        - 30. * phi
                        + 16. * phi[i+1]
                        - phi[i+2]
                ) / (12. * dx * dx);
-    return diff_phi
   }
 };
 
 stencil_function diffusion_x
 {
   storage dx, phi;
-  var diff_phi;
   Do
   {
-    diff_phi = (-phi[i-2]
+    return (-phi[i-2]
                        + 16. * phi[i-1]
                        - 30. * phi
                        + 16. * phi[i+1]
                        - phi[i+2]
                ) / (12. * dx * dx);
-    return diff_phi;
   }
 };
 
 stencil_function diffusion_y
 {
   storage dy, phi;
-  var diff_phi;
   Do
   {
-    diff_phi = (
+    return (
                        -       phi[j-2]
                        + 16. * phi[j-1]
                        - 30. * phi
                        + 16. * phi[j+1]
                        - phi[j+2]
                ) / (12. * dy * dy);
-    return diff_phi;
   }
 };
 
 stencil_function diffusion
 {
   storage dx, dy, u, v;
-  var diff_u_x, diff_u_y, diff_u, diff_v_x, diff_v_y, diff_v;
+  storage diff_u_x, diff_u_y, diff_u, diff_v_x, diff_v_y, diff_v;
   Do
   {
-    diff_u_x = diffusion_x(dx, u)
-    diff_u_y = diffusion_y(dy, u)
+    diff_u_x = diffusion_x(dx, u);
+    diff_u_y = diffusion_y(dy, u);
     diff_u = diff_u_x + diff_u_y;
 
     diff_v_x = diffusion_x(dx, v);

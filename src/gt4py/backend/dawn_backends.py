@@ -353,6 +353,11 @@ class SIRConverter(gt_ir.IRNodeVisitor):
         offset = [node.offset[ax] for ax in self.DOMAIN_AXES]
         return sir_utils.make_field_access_expr(name=node.name, offset=offset)
 
+    def visit_UnaryOpExpr(self, node: gt_ir.UnaryOpExpr, **kwargs):
+        arg = self.visit(node.arg)
+        op = node.op.python_symbol
+        return sir_utils.make_unary_operator(op, arg)
+
     def visit_BinOpExpr(self, node: gt_ir.BinOpExpr, **kwargs):
         left = self.visit(node.lhs)
         right = self.visit(node.rhs)

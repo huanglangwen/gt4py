@@ -362,6 +362,8 @@ class SIRConverter(gt_ir.IRNodeVisitor):
         left = self.visit(node.lhs)
         right = self.visit(node.rhs)
         op = node.op.python_symbol
+        if op == '**':
+            return self.visit_ExpOpExpr(left, right)
         return sir_utils.make_binary_operator(left, op, right)
 
     def visit_TernaryOpExpr(self, node: gt_ir.TernaryOpExpr, **kwargs):
@@ -376,6 +378,14 @@ class SIRConverter(gt_ir.IRNodeVisitor):
         field = sir_utils.make_field(name=node.name, dimensions=field_dimensions, is_temporary=self.in_stencil_)
         self.fields_[field.name] = field
         return field
+
+    def visit_ExpOpExpr(self, left, right):
+        exponent = right.value
+        if exponent == '2':
+            return sir_utils.make_binary_operator(left, '*', left)
+        # Currently only support squares so raise error...
+        raise RuntimeError("Unsupport exponential value: '%s'." % exponent)
+
 
     def visit_BlockStmt(self, node: gt_ir.BlockStmt, **kwargs):
         stmts = [self.visit(stmt) for stmt in node.stmts]

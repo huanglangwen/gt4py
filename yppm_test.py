@@ -142,7 +142,7 @@ def get_flux_stencil(q: sd, c: sd, al: sd, flux: sd, mord: int):
         # else:
         #    flux = tmp
 
-
+@gtscript.region(name='compute_al')
 def compute_al(q, dyvar, jord, ifirst, ilast, js1, je3):
     dimensions = q.shape
     al = utils.make_storage_from_shape(dimensions, origin)

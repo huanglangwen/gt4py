@@ -134,6 +134,8 @@ def stencil(
             definition, backend=backend, build_options=build_options, externals=externals or {}
         )
 
+def region(name=None, **kwargs):
+    print(f"In region: {name}")
 
 # GTScript builtins
 builtins = {
@@ -157,7 +159,7 @@ builtins = {
     "__INLINED",
 }
 
-__all__ = list(builtins) + ["function", "stencil"]
+__all__ = list(builtins) + ["function", "stencil", "region"]
 
 
 # GTScript builtins: domain axes

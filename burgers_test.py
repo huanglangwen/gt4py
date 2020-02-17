@@ -90,6 +90,53 @@ def diffusion(dx, dy, u, v):
 
     return diff_u, diff_v
 
+@gtscript.region
+def burgers_run():
+    x = np.linspace(0., 1., nx)
+    dx = 1. / (nx - 1)
+    y = np.linspace(0., 1., ny)
+    dy = 1. / (ny - 1)
+
+    u_now = zeros((nx, ny, 1), backend, dtype, origin)
+    v_now = zeros((nx, ny, 1), backend, dtype, origin)
+    u_new = zeros((nx, ny, 1), backend, dtype, origin)
+    v_new = zeros((nx, ny, 1), backend, dtype, origin)
+
+    set_initial_solution(x, y, u_new, v_new)
+
+    rk_fraction = (1. / 3., .5, 1.)
+
+    t = 0.
+
+    start_time = time.time()
+
+    for i in range(niter):
+        copy(in_phi=u_new, out_phi=u_now, origin=(0, 0, 0), domain=(nx, ny, 1))
+        copy(in_phi=v_new, out_phi=v_now, origin=(0, 0, 0), domain=(nx, ny, 1))
+
+        for k in range(3):
+            dt = rk_fraction[k] * timestep
+
+            rk_stage(
+                in_u_now=u_now, in_v_now=v_now, in_u_tmp=u_new, in_v_tmp=v_new,
+                out_u=u_new, out_v=v_new, dt=dt, dx=dx, dy=dy, mu=mu,
+                origin=(3, 3, 0), domain=(nx - 6, ny - 6, 1)
+            )
+
+            enforce_boundary_conditions(t + dt, x, y, u_new, v_new)
+
+        t += timestep
+        if print_period > 0 and ((i + 1) % print_period == 0 or i + 1 == niter):
+            u_ex, v_ex = solution_factory(t, x, y)
+            err_u = np.linalg.norm(u_new[3:-3, 3:-3] - u_ex[3:-3, 3:-3]) * np.sqrt(dx * dy)
+            err_v = np.linalg.norm(v_new[3:-3, 3:-3] - v_ex[3:-3, 3:-3]) * np.sqrt(dx * dy)
+            print(
+                "Iteration {:6d}: ||u - uex|| = {:8.4E} m/s, ||v - vex|| = {:8.4E} m/s".format(
+                    i + 1, err_u, err_v
+                )
+            )
+
+    print("\n- Running time: ", time.time() - start_time)
 
 #@gtscript.stencil(backend=backend, externals=externals, rebuild=rebuild, **backend_opts)
 @gtscript.stencil(backend=backend, rebuild=rebuild)
@@ -117,3 +164,11 @@ def rk_stage(
 def copy(in_phi: gtscript.Field[dtype], out_phi: gtscript.Field[dtype]):
     with computation(PARALLEL), interval(...):
         out_phi = in_phi[0, 0, 0]
+
+def zeros(storage_shape, backend, dtype, origin=None, mask=None):
+    origin = origin or (0, 0, 0)
+    origin = tuple(origin[i] if storage_shape[i] > 2 * origin[i] else 0 for i in range(3))
+    domain = tuple(storage_shape[i] - 2 * origin[i] for i in range(3))
+
+    gt_storage = gt.storage.zeros(backend=backend, dtype=dtype, shape=storage_shape, mask=mask, default_origin=origin)
+    return gt_storage

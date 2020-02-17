@@ -23,6 +23,7 @@ definitions for the keywords of the DSL.
 import collections
 import functools
 import inspect
+import ast
 
 from gt4py import definitions as gt_definitions
 
@@ -134,8 +135,22 @@ def stencil(
             definition, backend=backend, build_options=build_options, externals=externals or {}
         )
 
-def region(name=None, **kwargs):
-    print(f"In region: {name}")
+class RegionVisitor(ast.NodeTransformer):
+    pass
+
+def region(func, *args, **kwargs):
+    source = inspect.getsource(func)
+    source = '\n'.join(source.splitlines()[1:])  # remove the decorator first line.
+    func_ast = ast.parse(source)
+
+    name = kwargs['name'] if 'name' in kwargs else str(func).split()[1]
+    print(f"Visit region: {name}")
+    new_ast = RegionVisitor().visit(func_ast)
+
+    func_code = func.__code__
+    new_code = compile(new_ast, func_code.co_filename, 'exec')
+    new_func = types.FunctionType(new_code, {})
+    return new_func
 
 # GTScript builtins
 builtins = {

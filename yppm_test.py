@@ -30,6 +30,26 @@ sd = utils.sd
 origin = (0, 2, 0)
 
 
+@gtscript.region
+def compute_al(q, dyvar, jord, ifirst, ilast, js1, je3):
+    dimensions = q.shape
+    al = utils.make_storage_from_shape(dimensions, origin)
+    if (jord < 8):
+        main_al(q, al, origin=(ifirst, js1, 0), domain=(ilast - ifirst + 1, je3 - js1 + 1, grid.npz))
+        x_edge_domain = (dimensions[0], 1, dimensions[2])
+        if (not grid.nested and namelist['grid_type'] < 3):
+            # South Edge
+            if(grid.south_edge):
+                al_x_edge(q, dyvar, al,
+                          origin=(0, grid.js-1, 0),
+                          domain=x_edge_domain)
+            # North Edge
+            if(grid.north_edge):
+                al_x_edge(q, dyvar, al,
+                          origin=(0, grid.je, 0),
+                          domain=x_edge_domain)
+    return al
+
 @gtscript.stencil(backend=utils.exec_backend, externals={'p1': p1, 'p2': p2})
 def main_al(q: sd, al: sd):
     with computation(PARALLEL), interval(0, None):
@@ -141,26 +161,6 @@ def get_flux_stencil(q: sd, c: sd, al: sd, flux: sd, mord: int):
         #    flux = tmp + fx1
         # else:
         #    flux = tmp
-
-@gtscript.region(name='compute_al')
-def compute_al(q, dyvar, jord, ifirst, ilast, js1, je3):
-    dimensions = q.shape
-    al = utils.make_storage_from_shape(dimensions, origin)
-    if (jord < 8):
-        main_al(q, al, origin=(ifirst, js1, 0), domain=(ilast - ifirst + 1, je3 - js1 + 1, grid.npz))
-        x_edge_domain = (dimensions[0], 1, dimensions[2])
-        if (not grid.nested and namelist['grid_type'] < 3):
-            # South Edge
-            if(grid.south_edge):
-                al_x_edge(q, dyvar, al,
-                          origin=(0, grid.js-1, 0),
-                          domain=x_edge_domain)
-            # North Edge
-            if(grid.north_edge):
-                al_x_edge(q, dyvar, al,
-                          origin=(0, grid.je, 0),
-                          domain=x_edge_domain)
-    return al
 
 def compute_flux(q, c, jord, ifirst, ilast):
     js1 = max(5, grid.js - 1)

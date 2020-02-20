@@ -24,6 +24,7 @@ import collections
 import functools
 import inspect
 import ast
+import types
 
 from gt4py import definitions as gt_definitions
 

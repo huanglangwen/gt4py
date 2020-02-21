@@ -820,6 +820,11 @@ class IRMaker(ast.NodeVisitor):
 
         return result
 
+    def visit_AugAssign(self, node: ast.AugAssign) -> list:
+        bin_op = ast.BinOp(left=node.target, op=node.op, right=node.value)
+        assign = ast.Assign(targets=[node.target], value=bin_op)
+        return self.visit_Assign(assign)
+
     def visit_With(self, node: ast.With):
         loc = gt_ir.Location.from_ast_node(node)
         syntax_error = GTScriptSyntaxError(

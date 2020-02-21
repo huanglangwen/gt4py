@@ -15,7 +15,7 @@ def coriolis_stencil(
     with computation(FORWARD), interval(...):
         z_fv_north = fc * (v_nnow + v_nnow[1, 0, 0])
         z_fv_south = fc[0, -1, 0] * (v_nnow[0, -1, 0] + v_nnow[1, -1, 0])
-        u_tens += 0.25 * (z_fv_north + z_fv_south)
+        u_tens = u_tens + (0.25 * (z_fv_north + z_fv_south))
         z_fu_east = fc * (u_nnow + u_nnow[0, 1, 0])
         z_fu_west = fc[-1, 0, 0] * (u_nnow[-1, 0, 0] + u_nnow[-1, 1, 0])
-        v_tens -= 0.25 * (z_fu_east + z_fu_west)
+        v_tens = v_tens - (0.25 * (z_fu_east + z_fu_west))

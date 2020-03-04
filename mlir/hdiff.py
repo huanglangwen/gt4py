@@ -4,8 +4,7 @@ from gt4py import gtscript
 backend = "dawn:gtmc"
 dtype = float
 
-
-@gtscript.stencil(backend=backend)
+@gtscript.stencil(backend=backend, rebuild=True, dump_sir=True)
 def hdiff(
     input: gtscript.Field[dtype], coeff: gtscript.Field[dtype], output: gtscript.Field[dtype]
 ):

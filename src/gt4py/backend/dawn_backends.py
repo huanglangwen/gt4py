@@ -386,7 +386,6 @@ class SIRConverter(gt_ir.IRNodeVisitor):
         # Currently only support squares so raise error...
         raise RuntimeError("Unsupport exponential value: '%s'." % exponent)
 
-
     def visit_BlockStmt(self, node: gt_ir.BlockStmt, **kwargs):
         stmts = [self.visit(stmt) for stmt in node.stmts]
         return stmts
@@ -397,8 +396,17 @@ class SIRConverter(gt_ir.IRNodeVisitor):
         stmt = sir_utils.make_assignment_stmt(left, right, "=")
         return stmt
 
-    # def visit_If(self, node: gt_ir.If, **kwargs):
-    #     pass
+    def visit_AugAssign(self, node: gt_ir.AugAssign):
+        bin_op = gt_ir.BinOpExpr(lhs=node.target, op=node.op, rhs=node.value)
+        assign = gt_ir.Assign(target=node.target, value=bin_op)
+        return self.visit_Assign(assign)
+
+    def visit_If(self, node: gt_ir.If, **kwargs):
+        cond = sir_utils.make_expr_stmt(self.visit(node.condition))
+        then_part = self.visit(node.main_body)
+        else_part = self.visit(node.else_body)
+        stmt = sir_utils.make_if_stmt(cond, then_part, else_part)
+        return stmt
 
     def visit_AxisBound(self, node: gt_ir.AxisBound, **kwargs):
         assert isinstance(node.level, gt_ir.LevelMarker)
@@ -537,8 +545,8 @@ class BaseDawnBackend(gt_backend.BaseBackend):
         return result
 
     @classmethod
-    def generate(cls, stencil_id, definition_ir, definition_func, options):
-        cls._check_options(options)
+    def generate(cls, stencil_id, definition_ir, definition_func, build_options):
+        cls._check_options(build_options)
 
         # Generate the Python binary extension (checking if GridTools sources are installed)
         if not os.path.isfile(
@@ -548,11 +556,11 @@ class BaseDawnBackend(gt_backend.BaseBackend):
                 "Missing GridTools sources. Run 'python setup.py install_gt_sources'."
             )
         pyext_module_name, pyext_file_path = cls.generate_extension(
-            stencil_id, definition_ir, options
+            stencil_id, definition_ir, build_options
         )
 
         # Generate and return the Python wrapper class
-        generator_options = options.as_dict()
+        generator_options = build_options.as_dict()
         generator_options["pyext_module_name"] = pyext_module_name
         generator_options["pyext_file_path"] = pyext_file_path
 
@@ -563,14 +571,14 @@ class BaseDawnBackend(gt_backend.BaseBackend):
         )
 
     @classmethod
-    def generate_extension(cls, stencil_id, definition_ir, options, dump_sir=False):
+    def generate_extension(cls, stencil_id, definition_ir, build_options):
 
         sir = convert_to_SIR(definition_ir)
         sir_utils.pprint(sir)
-        sir_json = sir_utils.to_json(sir)
-        print(sir_json)
 
-        if dump_sir:
+        if build_options.backend_opts['dump_sir']:
+            sir_json = sir_utils.to_json(sir)
+            #print(sir_json)
             sir_data = json.loads(sir_json)
             d4py_utils.convert_sir(sir_data)
             sir_file = '%s_gt4py.sir' % stencil_id.qualified_name.split('.')[-1]
@@ -641,10 +649,10 @@ class BaseDawnBackend(gt_backend.BaseBackend):
                 f.write(source)
 
         pyext_opts = dict(
-            verbose=options.backend_opts.pop("verbose", True),
-            clean=options.backend_opts.pop("clean", False),
-            debug_mode=options.backend_opts.pop("debug_mode", False),
-            add_profile_info=options.backend_opts.pop("add_profile_info", False),
+            verbose = build_options.backend_opts.pop("verbose", True),
+            clean = build_options.backend_opts.pop("clean", False),
+            debug_mode = build_options.backend_opts.pop("debug_mode", False),
+            add_profile_info = build_options.backend_opts.pop("add_profile_info", False),
         )
 
         include_dirs = [

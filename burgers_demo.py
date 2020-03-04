@@ -3,7 +3,7 @@ from gt4py import gtscript
 
 backend="dawn:gtmc"
 dtype = float
-rebuild = False
+rebuild = True
 
 @gtscript.function
 def absolute_value(phi):
@@ -138,8 +138,7 @@ def burgers_run():
 
     print("\n- Running time: ", time.time() - start_time)
 
-#@gtscript.stencil(backend=backend, externals=externals, rebuild=rebuild, **backend_opts)
-@gtscript.stencil(backend=backend, rebuild=rebuild)
+@gtscript.stencil(backend=backend, rebuild=rebuild, dump_sir=True)
 def rk_stage(
         in_u_now: gtscript.Field[dtype],
         in_v_now: gtscript.Field[dtype],

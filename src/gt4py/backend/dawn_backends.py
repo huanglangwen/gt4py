@@ -576,9 +576,8 @@ class BaseDawnBackend(gt_backend.BaseBackend):
         sir = convert_to_SIR(definition_ir)
         sir_utils.pprint(sir)
 
-        if build_options.backend_opts['dump_sir']:
+        if 'dump_sir' in build_options.backend_opts and build_options.backend_opts['dump_sir']:
             sir_json = sir_utils.to_json(sir)
-            #print(sir_json)
             sir_data = json.loads(sir_json)
             d4py_utils.convert_sir(sir_data)
             sir_file = '%s_gt4py.sir' % stencil_id.qualified_name.split('.')[-1]

@@ -4,7 +4,7 @@ from gt4py import gtscript
 backend="dawn:gtmc" # "numpy"
 dtype = float
 
-@gtscript.stencil(backend=backend)
+@gtscript.stencil(backend=backend, rebuild=True, dump_sir=True)
 def coriolis_stencil(
     u_nnow: gtscript.Field[dtype],
     v_nnow: gtscript.Field[dtype],

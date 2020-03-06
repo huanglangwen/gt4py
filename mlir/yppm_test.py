@@ -6,7 +6,7 @@ import gt4py.gtscript as gtscript
 
 backend="dawn:gtmc"
 dtype = float
-rebuild = False
+rebuild = True
 
 from fv3._config import grid, namelist
 input_vars = ['q', 'c']
@@ -39,24 +39,24 @@ def compute_al(q, dyvar, jord, ifirst, ilast, js1, je3):
         x_edge_domain = (dimensions[0], 1, dimensions[2])
         if (not grid.nested and namelist['grid_type'] < 3):
             # South Edge
-            if(grid.south_edge):
+            if(grid.south_edge):    # (j_start, j_start+1)
                 al_x_edge(q, dyvar, al,
                           origin=(0, grid.js-1, 0),
                           domain=x_edge_domain)
             # North Edge
-            if(grid.north_edge):
+            if(grid.north_edge):    # (j_end - 1, j_end)
                 al_x_edge(q, dyvar, al,
                           origin=(0, grid.je, 0),
                           domain=x_edge_domain)
     return al
 
-@gtscript.stencil(backend=utils.exec_backend, externals={'p1': p1, 'p2': p2})
+@gtscript.stencil(backend=utils.exec_backend, externals={'p1': p1, 'p2': p2}, dump_sir=True)
 def main_al(q: sd, al: sd):
     with computation(PARALLEL), interval(0, None):
         al = p1 * (q[0, -1, 0] + q) + p2 * (q[0, -2, 0] + q[0, 1, 0])
 
 
-@gtscript.stencil(backend=utils.exec_backend, externals={'c1': c1, 'c2': c2, 'c3': c3})
+@gtscript.stencil(backend=utils.exec_backend, externals={'c1': c1, 'c2': c2, 'c3': c3}, dump_sir=True)
 def al_x_edge(q: sd, dya: sd, al: sd):
     with computation(PARALLEL), interval(0, None):
         al = c1 * q[0, -2, 0] + c2 * q[0, -1, 0] + c3 * q

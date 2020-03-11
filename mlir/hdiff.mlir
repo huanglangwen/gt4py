@@ -26,8 +26,6 @@ func @hdiff(%input_fd : !stencil.field<ijk,f64>,
       stencil.return %e4 : f64
 	} : !stencil.view<ijk,f64>
   // flx = 0.0 if ((lap[1,0,0] - lap[0,0,0]) * (input[1,0,0] - input[0,0,0])) > 0.0 else (lap[1,0,0] - lap[0,0,0])
-
-  // flx
   %flx = stencil.apply %arg2 = %input, %arg3 = %lap : !stencil.view<ijk,f64>, !stencil.view<ijk,f64> {
       %a0 = stencil.access %arg3[1, 0, 0] : (!stencil.view<ijk,f64>) -> f64
       %a1 = stencil.access %arg3[0, 0, 0] : (!stencil.view<ijk,f64>) -> f64

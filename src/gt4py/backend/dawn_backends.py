@@ -117,7 +117,7 @@ class SIRConverter(gt_ir.IRNodeVisitor):
         return sir_utils.make_var_access_expr(name=node.name, is_external=True)
 
     def visit_FieldRef(self, node: gt_ir.FieldRef, **kwargs):
-        offset = [node.offset[ax] for ax in DOMAIN_AXES]
+        offset = [node.offset[ax] if ax in node.offset else 0 for ax in DOMAIN_AXES]
         return sir_utils.make_field_access_expr(name=node.name, offset=offset)
 
     def visit_UnaryOpExpr(self, node: gt_ir.UnaryOpExpr, **kwargs):
@@ -129,7 +129,16 @@ class SIRConverter(gt_ir.IRNodeVisitor):
         left = self.visit(node.lhs)
         right = self.visit(node.rhs)
         op = node.op.python_symbol
+        if op == '**':
+            return self.visit_ExpOpExpr(left, right)
         return sir_utils.make_binary_operator(left, op, right)
+
+    def visit_ExpOpExpr(self, left, right):
+        exponent = right.value
+        if exponent == '2':
+            return sir_utils.make_binary_operator(left, '*', left)
+        # Currently only support squares so raise error...
+        raise RuntimeError("Unsupport exponential value: '%s'." % exponent)
 
     def visit_TernaryOpExpr(self, node: gt_ir.TernaryOpExpr, **kwargs):
         cond = self.visit(node.condition)
@@ -148,6 +157,11 @@ class SIRConverter(gt_ir.IRNodeVisitor):
         right = self.visit(node.value)
         stmt = sir_utils.make_assignment_stmt(left, right, "=")
         return stmt
+
+    def visit_AugAssign(self, node: gt_ir.AugAssign):
+        bin_op = gt_ir.BinOpExpr(lhs=node.target, op=node.op, rhs=node.value)
+        assign = gt_ir.Assign(target=node.target, value=bin_op)
+        return self.visit_Assign(assign)
 
     def visit_If(self, node: gt_ir.If, **kwargs):
         cond = sir_utils.make_expr_stmt(self.visit(node.condition))

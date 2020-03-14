@@ -239,10 +239,14 @@ class StencilObject(abc.ABC):
         for name, field in used_arg_fields.items():
             origin.setdefault(name, origin["_all_"] if "_all_" in origin else field.default_origin)
 
+        # TODO: Set upper boundaries to zero for now to confirm this is the issue..
+        #upper_boundaries = {name: self.field_info[name].boundary.upper_indices for name in shapes.keys()}
+        upper_boundaries = {name: Shape([0] * self.domain_info.ndims) for name in shapes.keys()}
+
         # Domain
         max_domain = Shape([sys.maxsize] * self.domain_info.ndims)
         for name, shape in shapes.items():
-            upper_boundary = Index(self.field_info[name].boundary.upper_indices)
+            upper_boundary = Index(upper_boundaries[name])
             max_domain &= shape - (Index(origin[name]) + upper_boundary)
 
         if domain is None:
@@ -269,7 +273,7 @@ class StencilObject(abc.ABC):
             min_shape = tuple(
                 o + d + h
                 for o, d, h in zip(
-                    origin[name], domain, self.field_info[name].boundary.upper_indices
+                    origin[name], domain, upper_boundaries[name]
                 )
             )
             if min_shape > field.shape:

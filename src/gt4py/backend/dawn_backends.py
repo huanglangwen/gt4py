@@ -528,7 +528,7 @@ for name in dir(dawn4py.Options):
         or name.startswith("deserialize")
     ):
         _DAWN_TOOLCHAIN_OPTIONS[name] = {"versioning": False}
-    elif not name.startswith("_") and name != "backend":
+    elif not name.startswith("_"): # and name != "backend":
         _DAWN_TOOLCHAIN_OPTIONS[name] = {"versioning": True}
 
 
@@ -591,19 +591,19 @@ class DawnGTCUDABackend(BaseDawnBackend):
         )
 
 
-# @gt_backend.register
-# class DawnNaiveBackend(BaseDawnBackend):
-#
-#     DAWN_BACKEND_NS = "cxxnaive"
-#     DAWN_BACKEND_NAME = "c++-naive"
-#     GT_BACKEND_T = "x86"
-#
-#     name = "dawn:naive"
-#     options = _DAWN_BACKEND_OPTIONS
-#     storage_info = gt_backend.GTX86Backend.storage_info
-#
-#     @classmethod
-#     def generate_extension(cls, stencil_id, definition_ir, options, **kwargs):
-#         return cls._generic_generate_extension(
-#             stencil_id, definition_ir, options, uses_cuda=False, **kwargs
-#         )
+@gt_backend.register
+class DawnNaiveBackend(BaseDawnBackend):
+
+    DAWN_BACKEND_NS = "cxxnaive"
+    DAWN_BACKEND_NAME = "c++-naive"
+    GT_BACKEND_T = "x86"
+
+    name = "dawn:naive"
+    options = _DAWN_BACKEND_OPTIONS
+    storage_info = gt_backend.GTX86Backend.storage_info
+
+    @classmethod
+    def generate_extension(cls, stencil_id, definition_ir, options, **kwargs):
+        return cls._generic_generate_extension(
+            stencil_id, definition_ir, options, uses_cuda=False, **kwargs
+        )

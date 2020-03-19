@@ -558,11 +558,11 @@ class DawnGTMCBackend(BaseDawnBackend):
 
     DAWN_BACKEND_NS = "gt"
     DAWN_BACKEND_NAME = "gridtools"
-    GT_BACKEND_T = "mc"
+    GT_BACKEND_T = "x86" #"mc"
 
     name = "dawn:gtmc"
     options = _DAWN_BACKEND_OPTIONS
-    storage_info = gt_backend.GTMCBackend.storage_info
+    storage_info = gt_backend.GTX86Backend.storage_info  #gt_backend.GTMCBackend.storage_info
 
     @classmethod
     def generate_extension(cls, stencil_id, definition_ir, options, **kwargs):
@@ -606,4 +606,23 @@ class DawnNaiveBackend(BaseDawnBackend):
     def generate_extension(cls, stencil_id, definition_ir, options, **kwargs):
         return cls._generic_generate_extension(
             stencil_id, definition_ir, options, uses_cuda=False, **kwargs
+        )
+
+@gt_backend.register
+class DawnCUDABackend(BaseDawnBackend):
+
+    DAWN_BACKEND_NS = "cuda"
+    DAWN_BACKEND_NAME = "cuda"
+    GT_BACKEND_T = "cuda"
+
+    MODULE_GENERATOR_CLASS = gt_backend.CUDAPyExtModuleGenerator
+
+    name = "dawn:cuda"
+    options = _DAWN_BACKEND_OPTIONS
+    storage_info = gt_backend.GTCUDABackend.storage_info
+
+    @classmethod
+    def generate_extension(cls, stencil_id, definition_ir, options, **kwargs):
+        return cls._generic_generate_extension(
+            stencil_id, definition_ir, options, uses_cuda=True, **kwargs
         )

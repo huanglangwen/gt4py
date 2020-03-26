@@ -289,7 +289,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
         )
 
     @classmethod
-    def generate_extension_sources(cls, stencil_id, definition_ir, options, gt_backend_t):
+    def generate_extension_sources(cls, stencil_id, definition_ir, options, gt_backend_t, default_opts=True):
         sir = convert_to_SIR(definition_ir)
         stencil_short_name = stencil_id.qualified_name.split(".")[-1]
 
@@ -308,15 +308,34 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
             with open(dump_sir_file, "w") as f:
                 f.write(sir_utils.to_json(sir))
 
+        if default_opts:
+            backend_opts['set_stage_name'] = True
+            backend_opts['stage_reordering'] = True
+            backend_opts['reorder_strategy'] = 'greedy'
+            backend_opts['stage_merger'] = True
+            backend_opts['set_caches'] = True
+            backend_opts['set_block_size'] = True
+
+        if dump_sir_opt:
+            backend_opts['serialize_iir'] = True            # For debug...
+
         dawn_opts = {
             key: value
             for key, value in backend_opts.items()
             if key in _DAWN_TOOLCHAIN_OPTIONS.keys()
         }
         source = dawn4py.compile(sir, **dawn_opts)
+        # if stencil_short_name == 'update_dz_c':
+        #    file = open('/home/eddied/Work/fv3ser/.gt_cache/py37_1013/dawnnaive/fv3/stencils/updatedzc/m_update_dz_c__dawnnaive_b83c31fdb3_pyext_BUILD/_dawn_update_dz_c_new.hpp', 'r')
+        #    source = file.read()
         stencil_unique_name = cls.get_pyext_class_name(stencil_id)
         module_name = cls.get_pyext_module_name(stencil_id)
         pyext_sources = {f"_dawn_{stencil_short_name}.hpp": source}
+
+        dump_src_opt = backend_opts.get("dump_src", True)
+        if dump_src_opt:
+            import sys
+            sys.stderr.write(source)
 
         arg_fields = [
             {"name": field.name, "dtype": cls._DATA_TYPE_TO_CPP[field.data_type], "layout_id": i}
@@ -480,7 +499,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
         pyext_opts = dict(
             verbose=options.backend_opts.get("verbose", False),
             clean=options.backend_opts.get("clean", False),
-            debug_mode=options.backend_opts.get("debug_mode", False),
+            debug_mode=options.backend_opts.get("debug_mode", True),
             add_profile_info=options.backend_opts.get("add_profile_info", False),
         )
         include_dirs = [
@@ -528,7 +547,7 @@ for name in dir(dawn4py.Options):
         or name.startswith("deserialize")
     ):
         _DAWN_TOOLCHAIN_OPTIONS[name] = {"versioning": False}
-    elif not name.startswith("_"): # and name != "backend":
+    elif not name.startswith("_"):
         _DAWN_TOOLCHAIN_OPTIONS[name] = {"versioning": True}
 
 

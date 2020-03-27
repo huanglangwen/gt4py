@@ -325,14 +325,11 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
             if key in _DAWN_TOOLCHAIN_OPTIONS.keys()
         }
         source = dawn4py.compile(sir, **dawn_opts)
-        # if stencil_short_name == 'update_dz_c':
-        #    file = open('/home/eddied/Work/fv3ser/.gt_cache/py37_1013/dawnnaive/fv3/stencils/updatedzc/m_update_dz_c__dawnnaive_b83c31fdb3_pyext_BUILD/_dawn_update_dz_c_new.hpp', 'r')
-        #    source = file.read()
         stencil_unique_name = cls.get_pyext_class_name(stencil_id)
         module_name = cls.get_pyext_module_name(stencil_id)
         pyext_sources = {f"_dawn_{stencil_short_name}.hpp": source}
 
-        dump_src_opt = backend_opts.get("dump_src", True)
+        dump_src_opt = backend_opts.get("dump_src", False)
         if dump_src_opt:
             import sys
             sys.stderr.write(source)

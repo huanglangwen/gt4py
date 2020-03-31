@@ -637,13 +637,6 @@ class DawnCUDABackend(BaseDawnBackend):
     name = "dawn:cuda"
     options = _DAWN_BACKEND_OPTIONS
     storage_info = gt_backend.GTX86Backend.storage_info
-    #storage_info = {
-    #    "alignment": 1,
-    #    "device": "gpu",
-    #    "layout_map": gt_backend.make_x86_layout_map,
-    #    "is_compatible_layout": gt_backend.x86_is_compatible_layout,
-    #    "is_compatible_type": gt_backend.x86_is_compatible_type
-    #}
 
     @classmethod
     def generate_extension(cls, stencil_id, definition_ir, options, **kwargs):

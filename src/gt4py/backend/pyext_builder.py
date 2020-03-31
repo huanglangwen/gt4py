@@ -258,6 +258,7 @@ def build_gtcuda_ext(
             *cxx_extra_compile_args_from_config,
         ],
         "nvcc": [
+            "-arch=sm_35",
             "-std=c++14",
             "-isystem={}".format(gt_config.build_settings["gt_include_path"]),
             "-isystem={}".format(gt_config.build_settings["boost_include_path"]),

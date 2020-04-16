@@ -27,6 +27,10 @@ CPU_BACKENDS = [
 GPU_BACKENDS = list(set(ALL_BACKENDS) - set(CPU_BACKENDS))
 INTERNAL_BACKENDS = ["debug", "numpy"] + [name for name in ALL_BACKENDS if name.startswith("gt")]
 
+DAWN_BACKENDS = [
+    name for name in ALL_BACKENDS if name.startswith('dawn')
+]
+
 # CPU_BACKENDS = ["dawn:gtx86"]
 # CPU_BACKENDS = ["debug", "numpy", "gtx86", "gtmc"]
 

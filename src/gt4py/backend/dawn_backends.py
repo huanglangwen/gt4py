@@ -35,6 +35,11 @@ from gt4py import utils as gt_utils
 
 DOMAIN_AXES = gt_definitions.CartesianSpace.names
 
+def enum_dict(enum):
+    return {k:v for k, v in enum.__dict__.items() if not k.startswith("__") and not k == "name"}
+
+DAWN_PASS_GROUPS = enum_dict(dawn4py.PassGroup)
+DAWN_CODEGEN_BACKENDS = enum_dict(dawn4py.CodeGenBackend)
 
 class FieldDeclCollector(gt_ir.IRNodeVisitor):
     @classmethod
@@ -295,7 +300,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
 
         backend_opts = dict(**options.backend_opts)
         backend_opts["backend"] = cls.DAWN_BACKEND_NAME
-        dawn_backend = cls.DAWN_BACKEND_NS
+        dawn_namespace = cls.DAWN_BACKEND_NS
 
         dump_sir_opt = backend_opts.get("dump_sir", False)
         if dump_sir_opt:
@@ -308,23 +313,25 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
             with open(dump_sir_file, "w") as f:
                 f.write(sir_utils.to_json(sir))
 
-        if default_opts:
-            backend_opts['set_stage_name'] = True
-            backend_opts['stage_reordering'] = True
-            backend_opts['reorder_strategy'] = 'greedy'
-            backend_opts['stage_merger'] = True
-            backend_opts['set_caches'] = True
-            backend_opts['set_block_size'] = True
+        # Get list of pass groups
+        pass_groups = []
+        if "default_opt" in backend_opts:
+            pass_groups = dawn4py.default_pass_groups()
+        elif "opt_groups" in backend_opts:
+            pass_groups = [DAWN_PASS_GROUPS[k] for k in backend_opts["opt_groups"]]
+            if "default_opt" in backend_opts:
+                raise ValueError("Do not add 'default_opt' when opt 'opt_groups'. Instead, append dawn4py.default_pass_groups()")
 
-        if dump_sir_opt:
-            backend_opts['serialize_iir'] = True            # For debug...
+        # If present, parse backend string
+        print(backend_opts)
+        dawn_backend = DAWN_CODEGEN_BACKENDS[backend_opts["backend"] or "GridTools"]
 
         dawn_opts = {
             key: value
             for key, value in backend_opts.items()
             if key in _DAWN_TOOLCHAIN_OPTIONS.keys()
         }
-        source = dawn4py.compile(sir, **dawn_opts)
+        source = dawn4py.compile(sir, groups=pass_groups, backend=dawn_backend, **dawn_opts)
         stencil_unique_name = cls.get_pyext_class_name(stencil_id)
         module_name = cls.get_pyext_module_name(stencil_id)
         pyext_sources = {f"_dawn_{stencil_short_name}.hpp": source}
@@ -358,7 +365,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
 
         template_args = dict(
             arg_fields=arg_fields,
-            dawn_backend=dawn_backend,
+            dawn_namespace=dawn_namespace,
             gt_backend=gt_backend_t,
             header_file=header_file,
             module_name=module_name,
@@ -535,7 +542,7 @@ _DAWN_BASE_OPTIONS = {
 
 
 _DAWN_TOOLCHAIN_OPTIONS = {}
-for name in dir(dawn4py.Options):
+for name in dir(dawn4py.CodeGenOptions) + dir(dawn4py.OptimizerOptions):
     if (
         name.startswith("print")
         or name.startswith("dump")
@@ -547,7 +554,6 @@ for name in dir(dawn4py.Options):
     elif not name.startswith("_"):
         _DAWN_TOOLCHAIN_OPTIONS[name] = {"versioning": True}
 
-
 _DAWN_BACKEND_OPTIONS = {**_DAWN_BASE_OPTIONS, **_DAWN_TOOLCHAIN_OPTIONS}
 
 
@@ -555,7 +561,7 @@ _DAWN_BACKEND_OPTIONS = {**_DAWN_BASE_OPTIONS, **_DAWN_TOOLCHAIN_OPTIONS}
 class DawnGTX86Backend(BaseDawnBackend):
 
     DAWN_BACKEND_NS = "gt"
-    DAWN_BACKEND_NAME = "gridtools"
+    DAWN_BACKEND_NAME = "GridTools"
     GT_BACKEND_T = "x86"
 
     name = "dawn:gtx86"
@@ -573,7 +579,7 @@ class DawnGTX86Backend(BaseDawnBackend):
 class DawnGTMCBackend(BaseDawnBackend):
 
     DAWN_BACKEND_NS = "gt"
-    DAWN_BACKEND_NAME = "gridtools"
+    DAWN_BACKEND_NAME = "GridTools"
     GT_BACKEND_T = "x86" #"mc"
 
     name = "dawn:gtmc"
@@ -591,7 +597,7 @@ class DawnGTMCBackend(BaseDawnBackend):
 class DawnGTCUDABackend(BaseDawnBackend):
 
     DAWN_BACKEND_NS = "gt"
-    DAWN_BACKEND_NAME = "gridtools"
+    DAWN_BACKEND_NAME = "GridTools"
     GT_BACKEND_T = "cuda"
 
     MODULE_GENERATOR_CLASS = gt_backend.CUDAPyExtModuleGenerator
@@ -611,7 +617,7 @@ class DawnGTCUDABackend(BaseDawnBackend):
 class DawnNaiveBackend(BaseDawnBackend):
 
     DAWN_BACKEND_NS = "cxxnaive"
-    DAWN_BACKEND_NAME = "c++-naive"
+    DAWN_BACKEND_NAME = "CXXNaive"
     GT_BACKEND_T = "x86"
 
     name = "dawn:naive"
@@ -629,7 +635,7 @@ class DawnNaiveBackend(BaseDawnBackend):
 class DawnCUDABackend(BaseDawnBackend):
 
     DAWN_BACKEND_NS = "cuda"
-    DAWN_BACKEND_NAME = "cuda"
+    DAWN_BACKEND_NAME = "CUDA"
     GT_BACKEND_T = "cuda"
 
     MODULE_GENERATOR_CLASS = gt_backend.CUDAPyExtModuleGenerator

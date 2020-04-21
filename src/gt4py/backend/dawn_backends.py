@@ -228,7 +228,7 @@ class SIRConverter(gt_ir.IRNodeVisitor):
 convert_to_SIR = SIRConverter.apply
 
 
-class BaseDawnBackend(gt_backend.BaseBackend):
+class BaseDawnBackend(gt_backend.BaseGTBackend):
 
     DAWN_BACKEND_NS = None
     DAWN_BACKEND_NAME = None
@@ -242,7 +242,7 @@ class BaseDawnBackend(gt_backend.BaseBackend):
 
     GT_BACKEND_T = None
 
-    GENERATOR_CLASS = gt_backend.PyExtModuleGenerator
+    GENERATOR_CLASS = gt_backend.GTPyExtGenerator
 
     TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
     TEMPLATE_FILES = {
@@ -520,6 +520,110 @@ class BaseDawnBackend(gt_backend.BaseBackend):
         )
 
     @classmethod
+    def get_pyext_module_name(cls, stencil_id: gt_definitions.StencilID, *, qualified=False):
+        module_name = cls.get_stencil_module_name(stencil_id, qualified=qualified) + "_pyext"
+        return module_name
+
+    @classmethod
+    def get_pyext_class_name(cls, stencil_id: gt_definitions.StencilID):
+        module_name = cls.get_stencil_class_name(stencil_id) + "_pyext"
+        return module_name
+
+    @classmethod
+    def get_pyext_build_path(cls, stencil_id: gt_definitions.StencilID):
+        path = os.path.join(
+            cls.get_stencil_package_path(stencil_id),
+            cls.get_pyext_module_name(stencil_id) + "_BUILD",
+        )
+
+        return path
+
+    @classmethod
+    def generate_cache_info(
+            cls, stencil_id: gt_definitions.StencilID, extra_cache_info: dict
+    ):
+        cache_info = super(BasePyExtBackend, cls).generate_cache_info(stencil_id, {})
+
+        cache_info["pyext_file_path"] = extra_cache_info["pyext_file_path"]
+        cache_info["pyext_md5"] = hashlib.md5(
+            open(cache_info["pyext_file_path"], "rb").read()
+        ).hexdigest()
+
+        return cache_info
+
+    @classmethod
+    def validate_cache_info(
+            cls,
+            stencil_id: gt_definitions.StencilID,
+            cache_info: dict,
+            *,
+            validate_hash: bool = True,
+    ):
+        result = True
+        try:
+            assert super(BasePyExtBackend, cls).validate_cache_info(
+                stencil_id, cache_info, validate_hash=validate_hash
+            )
+            pyext_md5 = hashlib.md5(open(cache_info["pyext_file_path"], "rb").read()).hexdigest()
+            if validate_hash:
+                result = pyext_md5 == cache_info["pyext_md5"]
+
+        except Exception:
+            result = False
+
+        return result
+
+    @classmethod
+    def build_extension_module(
+            cls,
+            stencil_id: gt_definitions.StencilID,
+            pyext_sources: dict,
+            pyext_build_opts: dict,
+            *,
+            pyext_extra_include_dirs: list = None,
+            uses_cuda: bool = False,
+    ):
+
+        # Build extension module
+        pyext_build_path = os.path.relpath(cls.get_pyext_build_path(stencil_id))
+        os.makedirs(pyext_build_path, exist_ok=True)
+        sources = []
+        for key, source in pyext_sources.items():
+            src_file_name = os.path.join(pyext_build_path, key)
+            src_ext = src_file_name.split(".")[-1]
+            if src_ext not in ["h", "hpp"]:
+                sources.append(src_file_name)
+
+            if source is not gt_utils.NOTHING:
+                with open(src_file_name, "w") as f:
+                    f.write(source)
+
+        pyext_target_path = cls.get_stencil_package_path(stencil_id)
+        qualified_pyext_name = cls.get_pyext_module_name(stencil_id, qualified=True)
+
+        if uses_cuda:
+            module_name, file_path = pyext_builder.build_gtcuda_ext(
+                qualified_pyext_name,
+                sources=sources,
+                build_path=pyext_build_path,
+                target_path=pyext_target_path,
+                extra_include_dirs=pyext_extra_include_dirs,
+                **pyext_build_opts,
+            )
+        else:
+            module_name, file_path = pyext_builder.build_gtcpu_ext(
+                qualified_pyext_name,
+                sources=sources,
+                build_path=pyext_build_path,
+                target_path=pyext_target_path,
+                extra_include_dirs=pyext_extra_include_dirs,
+                **pyext_build_opts,
+            )
+        assert module_name == qualified_pyext_name
+
+        return module_name, file_path
+
+    @classmethod
     @abc.abstractmethod
     def generate_extension(
         cls,
@@ -599,7 +703,7 @@ class DawnGTCUDABackend(BaseDawnBackend):
     DAWN_BACKEND_NAME = "GridTools"
     GT_BACKEND_T = "cuda"
 
-    GENERATOR_CLASS = gt_backend.CUDAPyExtModuleGenerator
+    GENERATOR_CLASS = gt_backend.GTCUDAPyModuleGenerator
 
     name = "dawn:gtcuda"
     options = _DAWN_BACKEND_OPTIONS
@@ -637,7 +741,7 @@ class DawnCUDABackend(BaseDawnBackend):
     DAWN_BACKEND_NAME = "CUDA"
     GT_BACKEND_T = "cuda"
 
-    GENERATOR_CLASS = gt_backend.CUDAPyExtModuleGenerator
+    GENERATOR_CLASS = gt_backend.GTCUDAPyModuleGenerator
 
     name = "dawn:cuda"
     options = _DAWN_BACKEND_OPTIONS

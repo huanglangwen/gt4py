@@ -35,11 +35,11 @@ from gt4py import utils as gt_utils
 
 DOMAIN_AXES = gt_definitions.CartesianSpace.names
 
-def enum_dict(enum):
+def _enum_dict(enum):
     return {k:v for k, v in enum.__dict__.items() if not k.startswith("__") and not k == "name"}
 
-DAWN_PASS_GROUPS = enum_dict(dawn4py.PassGroup)
-DAWN_CODEGEN_BACKENDS = enum_dict(dawn4py.CodeGenBackend)
+DAWN_PASS_GROUPS = _enum_dict(dawn4py.PassGroup)
+DAWN_CODEGEN_BACKENDS = _enum_dict(dawn4py.CodeGenBackend)
 
 class FieldDeclCollector(gt_ir.IRNodeVisitor):
     @classmethod

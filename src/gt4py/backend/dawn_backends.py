@@ -204,14 +204,14 @@ class SIRConverter(gt_ir.IRNodeVisitor):
 
         return vertical_region_stmt
 
-    def visit_StencilDefinition(self, node: gt_ir.StencilDefinition, **kwargs):
+    def visit_StencilImplementation(self, node: gt_ir.StencilImplementation):
         stencils = []
         functions = []
         global_variables = self._make_global_variables(node.parameters, node.externals)
 
         fields = FieldDeclCollector.apply(node)  # [self.visit(field) for field in node.api_fields]
         stencil_ast = sir_utils.make_ast(
-            [self.visit(computation) for computation in node.computations]
+            [self.visit(computation) for computation in node.multi_stages]
         )
         name = node.name.split(".")[-1]
         stencils.append(sir_utils.make_stencil(name=name, ast=stencil_ast, fields=fields))

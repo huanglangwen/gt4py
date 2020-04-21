@@ -493,9 +493,10 @@ class BaseGTBackend(gt_backend.BasePyExtBackend):
 
         cls._check_options(options)
 
-        # Generate the Python binary extension (checking if GridTools sources are installed)
-        if not gt_src_manager.has_gt_sources() and not gt_src_manager.install_gt_sources():
-            raise RuntimeError("Missing GridTools sources.")
+    def generate_implementation(self):
+        sources = gt_text.TextBlock(
+            indent_size=gt_backend.BaseModuleGenerator.TEMPLATE_INDENT_SIZE
+        )
 
         implementation_ir = gt_analysis.transform(definition_ir, options)
         pyext_module_name, pyext_file_path = cls.generate_extension(

@@ -14,11 +14,13 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-from .base import *
+from .concepts import *
 
 from .debug_backend import *
 from .numpy_backend import *
-from .gt_backends import *
+from .base_gt_backend import *
+from .gt_cpu_backend import *
+from .gt_cuda_backend import *
 
 try:
     import dawn4py

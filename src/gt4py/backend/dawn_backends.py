@@ -228,7 +228,7 @@ class SIRConverter(gt_ir.IRNodeVisitor):
 convert_to_SIR = SIRConverter.apply
 
 
-class BaseDawnBackend(gt_backend.BasePyExtBackend):
+class BaseDawnBackend(gt_backend.BaseBackend):
 
     DAWN_BACKEND_NS = None
     DAWN_BACKEND_NAME = None
@@ -242,7 +242,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
 
     GT_BACKEND_T = None
 
-    MODULE_GENERATOR_CLASS = gt_backend.PyExtModuleGenerator
+    GENERATOR_CLASS = gt_backend.PyExtModuleGenerator
 
     TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
     TEMPLATE_FILES = {
@@ -454,7 +454,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
 
             info["unreferenced"] = {}
 
-            generator = cls.MODULE_GENERATOR_CLASS(cls)
+            generator = cls.GENERATOR_CLASS(cls)
             module_source = generator(
                 stencil_id, definition_ir, options, wrapper_info=info, **kwargs
             )
@@ -599,7 +599,7 @@ class DawnGTCUDABackend(BaseDawnBackend):
     DAWN_BACKEND_NAME = "GridTools"
     GT_BACKEND_T = "cuda"
 
-    MODULE_GENERATOR_CLASS = gt_backend.CUDAPyExtModuleGenerator
+    GENERATOR_CLASS = gt_backend.CUDAPyExtModuleGenerator
 
     name = "dawn:gtcuda"
     options = _DAWN_BACKEND_OPTIONS
@@ -637,7 +637,7 @@ class DawnCUDABackend(BaseDawnBackend):
     DAWN_BACKEND_NAME = "CUDA"
     GT_BACKEND_T = "cuda"
 
-    MODULE_GENERATOR_CLASS = gt_backend.CUDAPyExtModuleGenerator
+    GENERATOR_CLASS = gt_backend.CUDAPyExtModuleGenerator
 
     name = "dawn:cuda"
     options = _DAWN_BACKEND_OPTIONS

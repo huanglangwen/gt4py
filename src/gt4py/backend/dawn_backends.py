@@ -323,7 +323,6 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
                 raise ValueError("Do not add 'default_opt' when opt 'opt_groups'. Instead, append dawn4py.default_pass_groups()")
 
         # If present, parse backend string
-        print(backend_opts)
         dawn_backend = DAWN_CODEGEN_BACKENDS[backend_opts["backend"] or "GridTools"]
 
         dawn_opts = {

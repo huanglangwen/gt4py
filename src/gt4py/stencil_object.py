@@ -19,6 +19,7 @@ from gt4py.definitions import (
     Index,
 )
 
+timings = {}
 
 class StencilObject(abc.ABC):
     """Generic singleton implementation of a stencil function.
@@ -281,6 +282,11 @@ class StencilObject(abc.ABC):
                     f"Shape of field {name} is {field.shape} but must be at least {min_shape} for given domain and origin."
                 )
 
+        stencil_name = self.options["module"] + "." + self.options["name"]
+        timings[stencil_name] = time.perf_counter()
+
         self.run(
             _domain_=domain, _origin_=origin, exec_info=exec_info, **field_args, **parameter_args
         )
+
+        timings[stencil_name] = (time.perf_counter() - timings[stencil_name]) * 1e-3

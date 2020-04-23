@@ -20,6 +20,7 @@ import numbers
 import os
 import re
 import types
+import copy
 
 import jinja2
 import numpy as np
@@ -583,7 +584,7 @@ class DawnGTMCBackend(BaseDawnBackend):
 
     name = "dawn:gtmc"
     options = _DAWN_BACKEND_OPTIONS
-    storage_info = gt_backend.GTX86Backend.storage_info  #gt_backend.GTMCBackend.storage_info
+    storage_info = gt_backend.GTX86Backend.storage_info
 
     @classmethod
     def generate_extension(cls, stencil_id, definition_ir, options, **kwargs):
@@ -603,7 +604,8 @@ class DawnGTCUDABackend(BaseDawnBackend):
 
     name = "dawn:gtcuda"
     options = _DAWN_BACKEND_OPTIONS
-    storage_info = gt_backend.GTCUDABackend.storage_info
+    storage_info =  copy.deepcopy(gt_backend.GTX86Backend.storage_info)
+    storage_info["device"] = "gpu"
 
     @classmethod
     def generate_extension(cls, stencil_id, definition_ir, options, **kwargs):
@@ -641,7 +643,7 @@ class DawnCUDABackend(BaseDawnBackend):
 
     name = "dawn:cuda"
     options = _DAWN_BACKEND_OPTIONS
-    storage_info = gt_backend.GTX86Backend.storage_info
+    storage_info =  copy.deepcopy(gt_backend.GTX86Backend.storage_info)
     storage_info["device"] = "gpu"
 
     @classmethod

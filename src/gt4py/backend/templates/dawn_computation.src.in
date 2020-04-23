@@ -133,7 +133,11 @@ void run(const std::array<gt::uint_t, 3>& domain,
 {%- endfor %}
 
     // Run computation and wait for the synchronization of the output stores
-    computation.run(
+{%- if gt_backend == "cuda" %}
+    computation.runWithoutSync(
+{%- else %}
+    computaiton.run(
+{%- endif %}
         {%- set comma = joiner(", ") %}
 {%- for field in arg_fields -%}
         {{ comma() }}ds_{{ field.name }}

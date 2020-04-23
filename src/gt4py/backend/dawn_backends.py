@@ -642,6 +642,7 @@ class DawnCUDABackend(BaseDawnBackend):
     name = "dawn:cuda"
     options = _DAWN_BACKEND_OPTIONS
     storage_info = gt_backend.GTX86Backend.storage_info
+    storage_info["device"] = "gpu"
 
     @classmethod
     def generate_extension(cls, stencil_id, definition_ir, options, **kwargs):

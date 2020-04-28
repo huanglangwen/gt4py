@@ -134,7 +134,7 @@ void run(const std::array<gt::uint_t, 3>& domain,
 
     // Run computation and wait for the synchronization of the output stores
 {%- if gt_backend == "cuda" %}
-    computation.run(
+    computation.runWithoutSync(
 {%- else %}
     computation.run(
 {%- endif %}

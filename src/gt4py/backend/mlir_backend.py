@@ -65,30 +65,36 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
 
         self.stack_ = deque()
         self.body_ = []
-        self.counters_ = {}
+        self.op_counts_ = {}
+        self.out_counts_ = {}
+        self.symbols_ = {}
         self.operations_ = OrderedDict()
         self.field_refs_ = OrderedDict()
 
         return self.visit(definition_ir)
 
-    def _add_operation(self, op):
-        type = op["type"]
-        prefix = "exp"
-        if type == gt_ir.ScalarLiteral:
-            prefix = "cst"
-        elif type == gt_ir.FieldRef:
-            prefix = "acc"
-        elif type == gt_ir.VarRef:
-            prefix = "var"
-        elif type == gt_ir.TernaryOpExpr:
-            prefix = "sel"
+    def _add_operation(self, operation):
+        key = str(operation)
+        if key in self.symbols_:
+            id = self.symbols_[key]
+        else:
+            type = operation["type"]
+            prefix = "exp"
+            if type == gt_ir.ScalarLiteral:
+                prefix = "cst"
+            elif type == gt_ir.FieldRef:
+                prefix = "acc"
+            elif type == gt_ir.VarRef:
+                prefix = "var"
+            elif type == gt_ir.TernaryOpExpr:
+                prefix = "sel"
 
-        if not prefix in self.counters_:
-            self.counters_[prefix] = 0
+            if not prefix in self.op_counts_:
+                self.op_counts_[prefix] = 0
 
-        id = "%s%d" % (prefix, self.counters_[prefix])
-        self.counters_[prefix] += 1
-        self.operations_[id] = op
+            id = "%s%d" % (prefix, self.op_counts_[prefix])
+            self.op_counts_[prefix] += 1
+            self.operations_[id] = operation
 
         self.stack_.append(id)
         print("push('%s')" % id)
@@ -97,72 +103,74 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
 
     def _emit_operation(self, id):
         operation = self.operations_[id]
-        type = operation["type"]
-        if type == gt_ir.ScalarLiteral:
-            # %cst0 = constant 4.0 : f64
-            code = f"%{id} = constant {operation['value']} : {operation['data_type']}"
-        elif type == gt_ir.FieldRef:
-            # %a0 = stencil.access %arg1[0, 0, 0] : (!stencil.view<ijk,f64>) -> f64
-            field = self._get_field(operation["name"])
-            field_ref = self.field_refs_[field["name"]]
-            arg_name = "arg%d" % field_ref
-            offset = ", ".join([str(index) for index in operation["offset"]])
-            view_type = f"!stencil.view<{field['dimensions']},{field['data_type']}>"
-            operation["data_type"] = field["data_type"]
-            code = f"%{id} = stencil.access %{arg_name}[{offset}] : ({view_type}) -> {operation['data_type']}"
-        elif type == gt_ir.VarRef:
-            code = ""
-        elif type == gt_ir.BinOpExpr:
-            # Use type of LHS for now...
-            lhs = self.operations_[operation["lhs"]]
-            data_type = lhs["data_type"]
+        key = str(operation)
+        if not key in self.symbols_:
+            self.symbols_[key] = id
+            type = operation["type"]
 
-            operator = operation["op"]
-            comp = ""
-            if operator == '+':
-                op_name = "add"
-            elif operator == '-':
-                op_name = "sub"
-            elif operator == '*':
-                op_name = "mul"
-            elif operator == '/':
-                op_name = "div"
-            elif operator == '>':
-                op_name = "cmp"
-                comp = "ogt"
-            elif operator == '<':
-                op_name = "cmp"
-                comp = "olt"
-            elif operator == '>=':
-                op_name = "cmp"
-                comp = "oge"
-            elif operator == '<=':
-                op_name = "cmp"
-                comp = "ole"
-            elif operator == '==':
-                op_name = "cmp"
-                comp = "eq"
-            elif operator == '!=':
-                op_name = "cmp"
-                comp = "ne"
-            else:
-                raise NotImplementedError(f"Unimplemented binary operator '{op_name}'")
+            if type == gt_ir.ScalarLiteral:
+                # %cst0 = constant 4.0 : f64
+                code = f"%{id} = constant {operation['value']} : {operation['data_type']}"
+            elif type == gt_ir.FieldRef:
+                # %a0 = stencil.access %arg1[0, 0, 0] : (!stencil.view<ijk,f64>) -> f64
+                field = self._get_field(operation["name"])
+                field_ref = self.field_refs_[field["name"]]
+                arg_name = "arg%d" % field_ref
+                offset = ", ".join([str(index) for index in operation["offset"]])
+                view_type = f"!stencil.view<{field['dimensions']},{field['data_type']}>"
+                code = f"%{id} = stencil.access %{arg_name}[{offset}] : ({view_type}) -> {operation['data_type']}"
+            #elif type == gt_ir.VarRef:
+            #    code = ""
+            elif type == gt_ir.BinOpExpr:
+                # Use type of LHS for now...
+                lhs = self.operations_[operation["lhs"]]
+                data_type = lhs["data_type"]
 
-            op_name += data_type[0]
-            if len(comp) > 0:
-                op_name += " \"%s\"" % comp
-            # %exp0 = subf %acc0, %acc1 : f64
-            operation["data_type"] = data_type
-            code = f"%{id} = {op_name} %{operation['lhs']}, %{operation['rhs']} -> {data_type}"
-        elif type == gt_ir.TernaryOpExpr:
-            # %s0 = select %e3, %c0, %e0 : f64
-            code = f"%{id} = select %{operation['cond']}, %{operation['lhs']}, %{operation['rhs']} : {operation['data_type']}"
-        else:   # Expr
-            raise NotImplementedError("Unimplemented node type '%s'" % str(type))
+                operator = operation["op"]
+                comp = ""
+                if operator == '+':
+                    op_name = "add"
+                elif operator == '-':
+                    op_name = "sub"
+                elif operator == '*':
+                    op_name = "mul"
+                elif operator == '/':
+                    op_name = "div"
+                elif operator == '>':
+                    op_name = "cmp"
+                    comp = "ogt"
+                elif operator == '<':
+                    op_name = "cmp"
+                    comp = "olt"
+                elif operator == '>=':
+                    op_name = "cmp"
+                    comp = "oge"
+                elif operator == '<=':
+                    op_name = "cmp"
+                    comp = "ole"
+                elif operator == '==':
+                    op_name = "cmp"
+                    comp = "eq"
+                elif operator == '!=':
+                    op_name = "cmp"
+                    comp = "ne"
+                else:
+                    raise NotImplementedError(f"Unimplemented binary operator '{op_name}'")
 
-        operation["code"] = code
-        self.body_.append(code)
-        print(code)
+                op_name += data_type[0]
+                if len(comp) > 0:
+                    op_name += " \"%s\"" % comp
+                # %exp0 = subf %acc0, %acc1 : f64
+                code = f"%{id} = {op_name} %{operation['lhs']}, %{operation['rhs']} : {data_type}"
+            elif type == gt_ir.TernaryOpExpr:
+                # %s0 = select %e3, %c0, %e0 : f64
+                code = f"%{id} = select %{operation['cond']}, %{operation['lhs']}, %{operation['rhs']} : {operation['data_type']}"
+            else:   # Expr
+                raise NotImplementedError("Unimplemented node type '%s'" % str(type))
+
+            #operation["code"] = code
+            self.body_.append(code)
+            print(code)
 
         return operation
 
@@ -190,6 +198,13 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
                 global_variables.map[param.name].double_value = param.init or 0.0
 
         return global_variables
+
+    def clear(self):
+        self.body_ = []
+        self.op_counts_ = {}
+        self.symbols_ = {}
+        self.field_refs_.clear()
+        self.stack_.clear()
 
     def visit_ScalarLiteral(self, node: gt_ir.ScalarLiteral, **kwargs):
         assert node.data_type != gt_ir.DataType.INVALID
@@ -225,10 +240,13 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         return field
 
     def visit_FieldRef(self, node: gt_ir.FieldRef, **kwargs):
+        field = self._get_field(node.name)
         offset = [node.offset[ax] if ax in node.offset else 0 for ax in DOMAIN_AXES]
+
         field_access_expr = {
             'name': node.name,
             'offset': offset,
+            'data_type': field["data_type"],
             'type': gt_ir.FieldRef
         }
 
@@ -253,16 +271,18 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         # Pop two items off the stack...
         rhs = self.stack_.pop()
         print("pop(%s)" % rhs)
+        self._emit_operation(rhs)
+
         lhs = self.stack_.pop()
         print("pop(%s)" % lhs)
-
         self._emit_operation(lhs)
-        self._emit_operation(rhs)
+        data_type = self.operations_[lhs]["data_type"]
 
         bin_op_expr = {
             'lhs': lhs,
             'rhs': rhs,
             'op': op,
+            'data_type': data_type,
             'type': gt_ir.BinOpExpr
         }
 
@@ -285,13 +305,14 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         # Pop three items off the stack...
         rhs = self.stack_.pop()
         print("pop(%s)" % rhs)
+        self._emit_operation(rhs)
+
         lhs = self.stack_.pop()
         print("pop(%s)" % lhs)
+        self._emit_operation(lhs)
+
         cexp = self.stack_.pop()
         print("pop(%s)" % cexp)
-
-        self._emit_operation(lhs)
-        self._emit_operation(rhs)
         self._emit_operation(cexp)
 
         ternary_op_expr = {
@@ -316,10 +337,7 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         return stmts
 
     def visit_Assign(self, node: gt_ir.Assign, **kwargs):
-        self.body_ = []
-        self.counters_ = {}
-        self.field_refs_.clear()
-        self.stack_.clear()
+        self.clear()
 
         left = self.visit(node.target)
         right = self.visit(node.value)
@@ -343,8 +361,15 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
             out_name = lhs_op['name']
             out_field = self._get_field(out_name)
 
+            if out_name in self.out_counts_:
+                self.out_counts_[out_name] += 1
+                out_name += str(self.out_counts_[out_name])
+            else:
+                self.out_counts_[out_name] = 0
+
             line = f"  %{out_name} = stencil.apply "
             for field_name in self.field_refs_:
+                # TODO: Fix bug here, not all fields that are not output will be inputs to this stencil.apply ...
                 if field_name != out_name:
                     line += "%%arg%d = %%%s, " % (self.field_refs_[field_name], field_name)
 

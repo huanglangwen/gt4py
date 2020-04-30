@@ -54,13 +54,11 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
 
     def __call__(
             self, definition_ir,
-            file=sys.stderr,
             indent='  ',
             field_size = DEFAULT_FIELD_SIZE,
             halo_size = DEFAULT_HALO_SIZE
     ):
         self.fields_ = []
-        self.file_ = file
         self.indent_ = indent
         self.field_size_ = field_size
         self.halo_size_ = halo_size
@@ -82,6 +80,8 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
             prefix = "acc"
         elif type == gt_ir.VarRef:
             prefix = "var"
+        elif type == gt_ir.TernaryOpExpr:
+            prefix = "sel"
 
         if not prefix in self.counters_:
             self.counters_[prefix] = 0
@@ -118,6 +118,7 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
             data_type = lhs["data_type"]
 
             operator = operation["op"]
+            comp = ""
             if operator == '+':
                 op_name = "add"
             elif operator == '-':
@@ -126,15 +127,38 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
                 op_name = "mul"
             elif operator == '/':
                 op_name = "div"
+            elif operator == '>':
+                op_name = "cmp"
+                comp = "ogt"
+            elif operator == '<':
+                op_name = "cmp"
+                comp = "olt"
+            elif operator == '>=':
+                op_name = "cmp"
+                comp = "oge"
+            elif operator == '<=':
+                op_name = "cmp"
+                comp = "ole"
+            elif operator == '==':
+                op_name = "cmp"
+                comp = "eq"
+            elif operator == '!=':
+                op_name = "cmp"
+                comp = "ne"
             else:
                 raise NotImplementedError(f"Unimplemented binary operator '{op_name}'")
 
             op_name += data_type[0]
+            if len(comp) > 0:
+                op_name += " \"%s\"" % comp
             # %exp0 = subf %acc0, %acc1 : f64
             operation["data_type"] = data_type
             code = f"%{id} = {op_name} %{operation['lhs']}, %{operation['rhs']} -> {data_type}"
+        elif type == gt_ir.TernaryOpExpr:
+            # %s0 = select %e3, %c0, %e0 : f64
+            code = f"%{id} = select %{operation['cond']}, %{operation['lhs']}, %{operation['rhs']} : {operation['data_type']}"
         else:   # Expr
-            code = ""
+            raise NotImplementedError("Unimplemented node type '%s'" % str(type))
 
         operation["code"] = code
         self.body_.append(code)
@@ -171,7 +195,7 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         assert node.data_type != gt_ir.DataType.INVALID
         literal_access_expr = {
             'value': node.value,
-            'data_type': str(node.data_type).replace('FLOAT', 'f'),
+            'data_type': str(node.data_type).replace('FLOAT', 'f').replace('INT', 'i'),
             'type': gt_ir.ScalarLiteral
         }
 
@@ -257,8 +281,30 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         cond = self.visit(node.condition)
         left = self.visit(node.then_expr)
         right = self.visit(node.else_expr)
-        # TODO: Start here tomorrow...
-        return sir_utils.make_ternary_operator(cond, left, right)
+
+        # Pop three items off the stack...
+        rhs = self.stack_.pop()
+        print("pop(%s)" % rhs)
+        lhs = self.stack_.pop()
+        print("pop(%s)" % lhs)
+        cexp = self.stack_.pop()
+        print("pop(%s)" % cexp)
+
+        self._emit_operation(lhs)
+        self._emit_operation(rhs)
+        self._emit_operation(cexp)
+
+        ternary_op_expr = {
+            'lhs': lhs,
+            'rhs': rhs,
+            'cond': cexp,
+            'type': gt_ir.TernaryOpExpr
+        }
+
+        ternary_op_expr["data_type"] = self.operations_[lhs]["data_type"]
+        id = self._add_operation(ternary_op_expr)
+
+        return ternary_op_expr
 
     def visit_BlockStmt(self, node: gt_ir.BlockStmt, *, make_block=True, **kwargs):
         stmts = [self.visit(stmt) for stmt in node.stmts] # if not isinstance(stmt, gt_ir.FieldDecl)]
@@ -271,6 +317,7 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
 
     def visit_Assign(self, node: gt_ir.Assign, **kwargs):
         self.body_ = []
+        self.counters_ = {}
         self.field_refs_.clear()
         self.stack_.clear()
 
@@ -295,6 +342,7 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
             # %lap = stencil.apply %arg1 = %input : !stencil.view<ijk,f64> {
             out_name = lhs_op['name']
             out_field = self._get_field(out_name)
+
             line = f"  %{out_name} = stencil.apply "
             for field_name in self.field_refs_:
                 if field_name != out_name:
@@ -366,6 +414,9 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         global_variables = self._make_global_variables(node.parameters, node.externals)
 
         stencil_name = node.name.split(".")[-1]
+        file_name = os.getcwd() + "/" + stencil_name + ".mlir"
+        self.file_ = open(file_name, "w")
+
         fields = [self.visit(field) for field in node.api_fields]
 
         if self.file_:
@@ -420,6 +471,7 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
                         f"  stencil.store %{field_name} to %{field_name}_fd ([{origin}] : [{field_sizes}]) : ({stencil_type}) -> {stencil_type}\n")
 
             self.file_.write("  return\n }\n}\n")
+            self.file_.close()
 
         stencil = {
             'name': stencil_name,
@@ -429,7 +481,7 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         stencils.append(stencil)
 
         mlir = {
-            'file_name': name + '.mlir',
+            'file_name': file_name,
             'grid_type': 'Cartesian',
             'functions': functions,
             'stencils': stencils,
@@ -529,6 +581,8 @@ class MLIRBackend(gt_backend.BasePyExtBackend):
 
             with open(dump_mlir_file, "w") as f:
                 f.write(json.puts(mlir))
+
+        # TODO
 
         if default_opts:
             backend_opts['set_stage_name'] = True

@@ -70,6 +70,7 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         self.symbols_ = {}
         self.operations_ = OrderedDict()
         self.field_refs_ = OrderedDict()
+        self.max_arg_ = 0
 
         return self.visit(definition_ir)
 
@@ -199,12 +200,13 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
 
         return global_variables
 
-    def clear(self):
+    def reset(self):
         self.body_ = []
         self.op_counts_ = {}
         self.symbols_ = {}
         self.field_refs_.clear()
         self.stack_.clear()
+        self.max_arg_ -= 1
 
     def visit_ScalarLiteral(self, node: gt_ir.ScalarLiteral, **kwargs):
         assert node.data_type != gt_ir.DataType.INVALID
@@ -252,7 +254,8 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
 
         id = self._add_operation(field_access_expr)
         if node.name not in self.field_refs_:
-            self.field_refs_[node.name] = len(self.field_refs_)
+            self.field_refs_[node.name] = self.max_arg_
+            self.max_arg_ += 1
 
         return field_access_expr
 
@@ -337,7 +340,7 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         return stmts
 
     def visit_Assign(self, node: gt_ir.Assign, **kwargs):
-        self.clear()
+        self.reset()
 
         left = self.visit(node.target)
         right = self.visit(node.value)

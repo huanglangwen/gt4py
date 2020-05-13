@@ -36,11 +36,14 @@ from gt4py import utils as gt_utils
 
 DOMAIN_AXES = gt_definitions.CartesianSpace.names
 
+
 def _enum_dict(enum):
-    return {k:v for k, v in enum.__dict__.items() if not k.startswith("__") and not k == "name"}
+    return {k: v for k, v in enum.__dict__.items() if not k.startswith("__") and not k == "name"}
+
 
 DAWN_PASS_GROUPS = _enum_dict(dawn4py.PassGroup)
 DAWN_CODEGEN_BACKENDS = _enum_dict(dawn4py.CodeGenBackend)
+
 
 class FieldDeclCollector(gt_ir.IRNodeVisitor):
     @classmethod
@@ -125,14 +128,14 @@ class SIRConverter(gt_ir.IRNodeVisitor):
         left = self.visit(node.lhs)
         right = self.visit(node.rhs)
         op = node.op.python_symbol
-        if op == '**':
+        if op == "**":
             return self.visit_ExpOpExpr(left, right)
         return sir_utils.make_binary_operator(left, op, right)
 
     def visit_ExpOpExpr(self, left, right):
         exponent = right.value
-        if exponent == '2':
-            return sir_utils.make_binary_operator(left, '*', left)
+        if exponent == "2":
+            return sir_utils.make_binary_operator(left, "*", left)
         # Currently only support squares so raise error...
         raise RuntimeError("Unsupport exponential value: '%s'." % exponent)
 
@@ -285,7 +288,9 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
         )
 
     @classmethod
-    def generate_extension_sources(cls, stencil_id, definition_ir, options, gt_backend_t, default_opts=True):
+    def generate_extension_sources(
+        cls, stencil_id, definition_ir, options, gt_backend_t, default_opts=True
+    ):
         sir = convert_to_SIR(definition_ir)
         stencil_short_name = stencil_id.qualified_name.split(".")[-1]
 
@@ -311,7 +316,9 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
         elif "opt_groups" in backend_opts:
             pass_groups = [DAWN_PASS_GROUPS[k] for k in backend_opts["opt_groups"]]
             if "default_opt" in backend_opts:
-                raise ValueError("Do not add 'default_opt' when opt 'opt_groups'. Instead, append dawn4py.default_pass_groups()")
+                raise ValueError(
+                    "Do not add 'default_opt' when opt 'opt_groups'. Instead, append dawn4py.default_pass_groups()"
+                )
 
         # If present, parse backend string
         dawn_backend = DAWN_CODEGEN_BACKENDS[backend_opts["backend"] or "GridTools"]
@@ -321,7 +328,13 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
             for key, value in backend_opts.items()
             if key in _DAWN_TOOLCHAIN_OPTIONS.keys()
         }
-        source = dawn4py.compile(sir, groups=pass_groups, backend=dawn_backend, **dawn_opts)
+        source = dawn4py.compile(
+            sir,
+            groups=pass_groups,
+            backend=dawn_backend,
+            run_with_sync=("CUDA" not in str(dawn_backend)),
+            **dawn_opts,
+        )
         stencil_unique_name = cls.get_pyext_class_name(stencil_id)
         module_name = cls.get_pyext_module_name(stencil_id)
         pyext_sources = {f"_dawn_{stencil_short_name}.hpp": source}
@@ -329,6 +342,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
         dump_src_opt = backend_opts.get("dump_src", False)
         if dump_src_opt:
             import sys
+
             sys.stderr.write(source)
 
         arg_fields = [
@@ -493,7 +507,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
         pyext_opts = dict(
             verbose=options.backend_opts.get("verbose", False),
             clean=options.backend_opts.get("clean", False),
-            debug_mode=options.backend_opts.get("debug_mode", True),
+            debug_mode=options.backend_opts.get("debug_mode", False),
             add_profile_info=options.backend_opts.get("add_profile_info", False),
         )
         include_dirs = [
@@ -525,7 +539,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
 _DAWN_BASE_OPTIONS = {
     "add_profile_info": {"versioning": True},
     "clean": {"versioning": False},
-    "debug_mode": {"versioning": True},
+    "debug_mode": {"versioning": False},
     "dump_sir": {"versioning": False},
     "verbose": {"versioning": False},
 }
@@ -570,7 +584,7 @@ class DawnGTMCBackend(BaseDawnBackend):
 
     DAWN_BACKEND_NS = "gt"
     DAWN_BACKEND_NAME = "GridTools"
-    GT_BACKEND_T = "x86" #"mc"
+    GT_BACKEND_T = "x86"  # "mc"
 
     name = "dawn:gtmc"
     options = _DAWN_BACKEND_OPTIONS
@@ -593,8 +607,7 @@ class DawnGTCUDABackend(BaseDawnBackend):
 
     name = "dawn:gtcuda"
     options = _DAWN_BACKEND_OPTIONS
-    options["run_with_sync"] = {"versioning": False}
-    storage_info =  copy.deepcopy(gt_backend.GTX86Backend.storage_info)
+    storage_info = copy.deepcopy(gt_backend.GTX86Backend.storage_info)
     storage_info["device"] = "gpu"
 
     @classmethod
@@ -650,9 +663,7 @@ class DawnCUDABackend(BaseDawnBackend):
 
     name = "dawn:cuda"
     options = _DAWN_BACKEND_OPTIONS
-    options["run_with_sync"] = {"versioning": False}
-
-    storage_info =  copy.deepcopy(gt_backend.GTX86Backend.storage_info)
+    storage_info = copy.deepcopy(gt_backend.GTX86Backend.storage_info)
     storage_info["device"] = "gpu"
 
     @classmethod

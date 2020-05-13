@@ -493,7 +493,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
         pyext_opts = dict(
             verbose=options.backend_opts.get("verbose", False),
             clean=options.backend_opts.get("clean", False),
-            debug_mode=options.backend_opts.get("debug_mode", False),
+            debug_mode=options.backend_opts.get("debug_mode", True),
             add_profile_info=options.backend_opts.get("add_profile_info", False),
         )
         include_dirs = [
@@ -589,11 +589,11 @@ class DawnGTCUDABackend(BaseDawnBackend):
     DAWN_BACKEND_NS = "gt"
     DAWN_BACKEND_NAME = "GridTools"
     GT_BACKEND_T = "cuda"
-
     MODULE_GENERATOR_CLASS = gt_backend.CUDAPyExtModuleGenerator
 
     name = "dawn:gtcuda"
     options = _DAWN_BACKEND_OPTIONS
+    options["run_with_sync"] = False
     storage_info =  copy.deepcopy(gt_backend.GTX86Backend.storage_info)
     storage_info["device"] = "gpu"
 
@@ -646,11 +646,12 @@ class DawnCUDABackend(BaseDawnBackend):
     DAWN_BACKEND_NS = "cuda"
     DAWN_BACKEND_NAME = "CUDA"
     GT_BACKEND_T = "cuda"
-
     MODULE_GENERATOR_CLASS = gt_backend.CUDAPyExtModuleGenerator
 
     name = "dawn:cuda"
     options = _DAWN_BACKEND_OPTIONS
+    options["run_with_sync"] = False
+
     storage_info =  copy.deepcopy(gt_backend.GTX86Backend.storage_info)
     storage_info["device"] = "gpu"
 

@@ -226,7 +226,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
     DAWN_BACKEND_OPTS = {
         "add_profile_info": {"versioning": True},
         "clean": {"versioning": False},
-        "debug_mode": {"versioning": True},
+        "debug_mode": {"versioning": False},
         "dump_sir": {"versioning": False},
         "verbose": {"versioning": False},
     }
@@ -593,7 +593,7 @@ class DawnGTCUDABackend(BaseDawnBackend):
 
     name = "dawn:gtcuda"
     options = _DAWN_BACKEND_OPTIONS
-    options["run_with_sync"] = False
+    options["run_with_sync"] = {"versioning": False}
     storage_info =  copy.deepcopy(gt_backend.GTX86Backend.storage_info)
     storage_info["device"] = "gpu"
 
@@ -650,7 +650,7 @@ class DawnCUDABackend(BaseDawnBackend):
 
     name = "dawn:cuda"
     options = _DAWN_BACKEND_OPTIONS
-    options["run_with_sync"] = False
+    options["run_with_sync"] = {"versioning": False}
 
     storage_info =  copy.deepcopy(gt_backend.GTX86Backend.storage_info)
     storage_info["device"] = "gpu"

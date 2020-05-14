@@ -34,6 +34,7 @@ from gt4py import definitions as gt_definitions
 from gt4py import ir as gt_ir
 from gt4py import utils as gt_utils
 
+DEBUG_MODE = False
 DOMAIN_AXES = gt_definitions.CartesianSpace.names
 
 
@@ -229,7 +230,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
     DAWN_BACKEND_OPTS = {
         "add_profile_info": {"versioning": True},
         "clean": {"versioning": False},
-        "debug_mode": {"versioning": False},
+        "debug_mode": {"versioning": DEBUG_MODE},
         "dump_sir": {"versioning": False},
         "verbose": {"versioning": False},
     }
@@ -342,7 +343,6 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
         dump_src_opt = backend_opts.get("dump_src", False)
         if dump_src_opt:
             import sys
-
             sys.stderr.write(source)
 
         arg_fields = [
@@ -507,7 +507,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
         pyext_opts = dict(
             verbose=options.backend_opts.get("verbose", False),
             clean=options.backend_opts.get("clean", False),
-            debug_mode=options.backend_opts.get("debug_mode", False),
+            debug_mode=options.backend_opts.get("debug_mode", DEBUG_MODE),
             add_profile_info=options.backend_opts.get("add_profile_info", False),
         )
         include_dirs = [
@@ -539,7 +539,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
 _DAWN_BASE_OPTIONS = {
     "add_profile_info": {"versioning": True},
     "clean": {"versioning": False},
-    "debug_mode": {"versioning": False},
+    "debug_mode": {"versioning": DEBUG_MODE},
     "dump_sir": {"versioning": False},
     "verbose": {"versioning": False},
 }

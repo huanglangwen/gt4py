@@ -277,7 +277,7 @@ def build_gtcuda_ext(
     extra_link_args = [*gt_config.build_settings["extra_link_args"]]
 
     if debug_mode:
-        debug_flags = ["-O0", "-ggdb"]
+        debug_flags = ["-O0", "-g"]
         extra_compile_args["cxx"].extend(debug_flags)
         extra_compile_args["nvcc"].extend(debug_flags)
         extra_link_args.extend(debug_flags)

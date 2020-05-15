@@ -16,15 +16,12 @@
 
  ---- Template variables ----
 
-    - arg_fields: [{ "name": str, "dtype": str, "size": int, "data": str, "origin": [int, int, int], "shape": [int, int, int], "stride": [int, int, int] }]
+    - arg_fields: [{ "name": str, "dtype": str, "size": int, "origin": [int, int, int], "shape": [int, int, int], "stride": [int, int, int] }]
     - domain: [int, int, int]
     - parameters: [{ "name": str, "dtype": str, "value": str }]
-    - gt_backend: str
-    - module_name: str
     - stencil_short_name: str
     - stencil_unique_name: str
 #}
-
 #include "computation.hpp"
 
 #include <gtest/gtest.h>
@@ -32,24 +29,34 @@
 #include <vector>
 #include <chrono>
 
-namespace {{ stencil_unique_name }} {
+namespace {{ stencil_unique_name }}_pyext {
+
+typedef float float32;
+typedef double float64;
 
 TEST(TestGT4Py, {{ stencil_short_name }}) {
   std::array<unsigned, 3> domain{ {{ domain[0] }}, {{ domain[1] }}, {{ domain[2] }} };
-{% for field in arg_fields %}
+{% for field in arg_fields -%}
   std::array<unsigned, 3> {{ field.name }}_origin{ {{ field.origin[0] }}, {{ field.origin[1] }}, {{ field.origin[2] }} };
-{% endfor %}
-{% for param in parameters %}
+{% endfor -%}
+
+
+{% for param in parameters -%}
   {{ param.dtype }} {{ param.name }} = {{ param.value }};
-{% endfor %}
+{% endfor -%}
 
-{% for field in arg_fields %}
-  std::array<{{ field.dtype }}, {{ field.size }}> {{ field.name }} { {{ field.data }} };
-{% endfor %}
 
-{% for field in arg_fields %}
-  auto bi_{{ field.name }} = BufferInfo{3, { {{ field.shape[0] }}, {{ field.shape[1] }}, {{ field.shape[2] }} }, { {{ field.stride[0] }}, {{ field.stride[1] }}, {{ field.stride[2] }} }, {{ field.name }}.data() };
-{% endfor %}
+{% for field in arg_fields -%}
+  std::array<{{ field.dtype }}, {{ field.size }}> {{ field.name }} {
+  #include "data/{{ field.name }}.csv"
+  };
+{% endfor -%}
+
+
+{% for field in arg_fields -%}
+  auto bi_{{ field.name }} = BufferInfo{3, { {{ field.shape[0] }}, {{ field.shape[1] }}, {{ field.shape[2] }} }, { {{ field.stride[0] }}, {{ field.stride[1] }}, {{ field.stride[2] }} }, {{ field.name }}.data()};
+{% endfor -%}
+
 
   double start_run_cpp_time =
       static_cast<double>(
@@ -57,17 +64,15 @@ TEST(TestGT4Py, {{ stencil_short_name }}) {
               std::chrono::high_resolution_clock::now().time_since_epoch())
               .count()) * 1e-9;
 
-  //run(domain, bi_uc_in, uc_in_origin, bi_delpc, delpc_origin, bi_pkc,
-  //    pkc_origin, bi_gz, gz_origin, bi_rdxc, rdxc_origin, hydrostatic, dt2);
   run(domain,
 {%- set comma = joiner(", ") -%}
 {%- for field in arg_fields -%}
-        {{- comma() }}
-        bi_{{ field.name }}, {{ field.name }}_origin
+      {{- comma() }}
+      bi_{{ field.name }}, {{ field.name }}_origin
 {%- endfor -%}
 {%- for param in parameters -%}
-        {{- comma() }}
-        {{ param.name }}
+      {{- comma() }}
+      {{ param.name }}
 {%- endfor %});
 
   double end_run_cpp_time = static_cast<double>(
@@ -78,4 +83,12 @@ TEST(TestGT4Py, {{ stencil_short_name }}) {
             << end_run_cpp_time - start_run_cpp_time << std::endl;
 
   SUCCEED();
-} // namespace {{ stencil_unique_name }}
+} // TestGT4Py_{{ stencil_short_name }}
+
+} // namespace {{ stencil_unique_name }}_pyext
+
+int main(int argc, char* argv[]) {
+  // Initialize GTest
+  testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
+} // main

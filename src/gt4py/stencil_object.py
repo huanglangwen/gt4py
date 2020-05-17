@@ -294,6 +294,7 @@ class StencilObject(abc.ABC):
 
         timings[stencil_name] = (time.perf_counter() - timings[stencil_name]) * 1e-3
 
+
     def _write_unit_test(
         self, domain: tuple, origins: dict, shapes: dict, field_args: dict, parameter_args: dict
     ):

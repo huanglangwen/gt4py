@@ -86,9 +86,3 @@ TEST(TestGT4Py, {{ stencil_short_name }}) {
 } // TestGT4Py_{{ stencil_short_name }}
 
 } // namespace {{ stencil_unique_name }}_pyext
-
-int main(int argc, char* argv[]) {
-  // Initialize GTest
-  testing::InitGoogleTest(&argc, argv);
-  return RUN_ALL_TESTS();
-} // main

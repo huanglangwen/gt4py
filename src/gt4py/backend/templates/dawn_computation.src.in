@@ -23,6 +23,7 @@
     - parameters: [{ "name": str, "dtype": str }]
     - stencil_short_name: str
     - stencil_unique_name: str
+    - halo_size: int
 #}
 
 
@@ -51,7 +52,7 @@ namespace {
 
 gridtools::dawn::domain make_domain(const std::array<gt::uint_t, 3> &size) {
     gridtools::dawn::domain d{size};
-    d.set_halos(0, 0, 0, 0, 0, 0);
+    d.set_halos({{ halo_size }}, {{ halo_size }}, {{ halo_size }}, {{ halo_size }}, 0, 0);
     return d;
 }
 

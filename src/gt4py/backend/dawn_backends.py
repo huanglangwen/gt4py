@@ -289,7 +289,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
 
     @classmethod
     def generate_extension_sources(
-        cls, stencil_id, definition_ir, options, gt_backend_t, default_opts=True
+        cls, stencil_id, definition_ir, options, gt_backend_t, halo_size=0
     ):
         sir = convert_to_SIR(definition_ir)
         stencil_short_name = stencil_id.qualified_name.split(".")[-1]
@@ -375,6 +375,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
             parameters=parameters,
             stencil_short_name=stencil_short_name,
             stencil_unique_name=stencil_unique_name,
+            halo_size=halo_size,
         )
 
         for key, file_name in cls.TEMPLATE_FILES.items():

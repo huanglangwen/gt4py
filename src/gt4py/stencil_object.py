@@ -21,8 +21,6 @@ from gt4py.definitions import (
     Index,
 )
 
-timings = {}
-
 
 class StencilObject(abc.ABC):
     """Generic singleton implementation of a stencil function.
@@ -283,20 +281,26 @@ class StencilObject(abc.ABC):
                 )
 
         stencil_name = self.options["module"] + "." + self.options["name"]
-        timings[stencil_name] = time.perf_counter()
 
+        out_fields = []
         if gt_backend.DEBUG_MODE:
-            self._write_unit_test(domain, origin, shapes, field_args, parameter_args)
+            out_fields = self._write_unit_test(domain, origin, shapes, field_args, parameter_args)
 
         self.run(
             _domain_=domain, _origin_=origin, exec_info=exec_info, **field_args, **parameter_args
         )
 
-        timings[stencil_name] = (time.perf_counter() - timings[stencil_name]) * 1e-3
-
+        if gt_backend.DEBUG_MODE:
+            self._write_output_test_data(out_fields)
 
     def _write_unit_test(
-        self, domain: tuple, origins: dict, shapes: dict, field_args: dict, parameter_args: dict
+        self,
+        domain: tuple,
+        origins: dict,
+        shapes: dict,
+        field_args: dict,
+        parameter_args: dict,
+        out_indices=[0],
     ):
         components = self.__class__.__module__.split(".")[1:]
         if "GT_CACHE_DIR_NAME" in os.environ:
@@ -311,15 +315,17 @@ class StencilObject(abc.ABC):
 
         unit_test_name = "unit_test.cpp"
         unit_test_dir = (
-                os.path.join(unit_test_dir, cpython_id, backend, os.sep.join(components))
-                + "_pyext_BUILD"
+            os.path.join(unit_test_dir, cpython_id, backend, os.sep.join(components))
+            + "_pyext_BUILD"
         )
 
         data_dir = os.path.join(unit_test_dir, "data")
         os.makedirs(data_dir, exist_ok=True)
 
         arg_fields = []
-        for field_arg in field_args:
+        out_fields = []
+
+        for field_idx, field_arg in enumerate(field_args):
             field = field_args[field_arg]
             str_io = io.StringIO()
             np.savetxt(str_io, field.data.flatten())
@@ -339,6 +345,9 @@ class StencilObject(abc.ABC):
                 )
             )
 
+            if field_idx in out_indices:
+                out_fields.append(dict(name=field_arg, dtype=str(field.dtype)))
+
         parameters = []
         for param_arg in parameter_args:
             param = parameter_args[param_arg]
@@ -348,6 +357,7 @@ class StencilObject(abc.ABC):
             arg_fields=arg_fields,
             domain=tuple(domain),
             parameters=parameters,
+            out_fields=out_fields,
             stencil_short_name=self.options["name"],
             stencil_unique_name=self.__class__.__name__,
         )
@@ -360,3 +370,22 @@ class StencilObject(abc.ABC):
         unit_test_path = os.path.join(unit_test_dir, unit_test_name)
         unit_test_file = open(unit_test_path, "w")
         unit_test_file.write(unit_test_source)
+
+        # 2nd pass: get paths and references to output field data...
+        out_idx = 0
+        for field_idx, field_arg in enumerate(field_args):
+            if field_idx in out_indices:
+                out_fields[out_idx]["data"] = field_args[field_arg]
+                out_fields[out_idx]["path"] = os.path.join(
+                    data_dir, out_fields[out_idx]["name"] + "_out.csv"
+                )
+                out_idx += 1
+
+        return out_fields
+
+    def _write_output_test_data(self, out_fields: list):
+        for out_field in out_fields:
+            str_io = io.StringIO()
+            np.savetxt(str_io, out_field["data"].data.flatten())
+            data_file = open(out_field["path"], "w")
+            data_file.write(str_io.getvalue().replace("\n", ","))

@@ -35,6 +35,7 @@ from gt4py import ir as gt_ir
 from gt4py import utils as gt_utils
 
 DOMAIN_AXES = gt_definitions.CartesianSpace.names
+DUMP_SIR = False
 
 
 def _enum_dict(enum):
@@ -230,7 +231,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
         "add_profile_info": {"versioning": True},
         "clean": {"versioning": False},
         "debug_mode": {"versioning": gt_backend.DEBUG_MODE},
-        "dump_sir": {"versioning": False},
+        "dump_sir": {"versioning": DUMP_SIR},
         "verbose": {"versioning": False},
     }
 
@@ -298,7 +299,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
         backend_opts["backend"] = cls.DAWN_BACKEND_NAME
         dawn_namespace = cls.DAWN_BACKEND_NS
 
-        dump_sir_opt = backend_opts.get("dump_sir", False)
+        dump_sir_opt = backend_opts.get("dump_sir", DUMP_SIR)
         if dump_sir_opt:
             if isinstance(dump_sir_opt, str):
                 dump_sir_file = dump_sir_opt

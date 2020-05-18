@@ -2,7 +2,9 @@ import abc
 import sys
 import time
 import warnings
-
+import io
+import os
+import jinja2
 import numpy as np
 
 import gt4py.backend as gt_backend
@@ -18,6 +20,8 @@ from gt4py.definitions import (
     Shape,
     Index,
 )
+
+timings = {}
 
 
 class StencilObject(abc.ABC):
@@ -240,7 +244,7 @@ class StencilObject(abc.ABC):
             origin.setdefault(name, origin["_all_"] if "_all_" in origin else field.default_origin)
 
         # TODO: Set upper boundaries to zero for now to confirm this is the issue..
-        #upper_boundaries = {name: self.field_info[name].boundary.upper_indices for name in shapes.keys()}
+        # upper_boundaries = {name: self.field_info[name].boundary.upper_indices for name in shapes.keys()}
         upper_boundaries = {name: Shape([0] * self.domain_info.ndims) for name in shapes.keys()}
 
         # Domain
@@ -271,16 +275,88 @@ class StencilObject(abc.ABC):
                     f"Origin for field {name} too small. Must be at least {min_origin}, is {origin[name]}"
                 )
             min_shape = tuple(
-                o + d + h
-                for o, d, h in zip(
-                    origin[name], domain, upper_boundaries[name]
-                )
+                o + d + h for o, d, h in zip(origin[name], domain, upper_boundaries[name])
             )
             if min_shape > field.shape:
                 raise ValueError(
                     f"Shape of field {name} is {field.shape} but must be at least {min_shape} for given domain and origin."
                 )
 
+        stencil_name = self.options["module"] + "." + self.options["name"]
+        timings[stencil_name] = time.perf_counter()
+
+        if gt_backend.DEBUG_MODE:
+            self._write_unit_test(domain, origin, shapes, field_args, parameter_args)
+
         self.run(
             _domain_=domain, _origin_=origin, exec_info=exec_info, **field_args, **parameter_args
         )
+
+        timings[stencil_name] = (time.perf_counter() - timings[stencil_name]) * 1e-3
+
+
+    def _write_unit_test(
+        self, domain: tuple, origins: dict, shapes: dict, field_args: dict, parameter_args: dict
+    ):
+        components = self.__class__.__module__.split(".")[1:]
+        if "GT_CACHE_DIR_NAME" in os.environ:
+            unit_test_dir = os.environ["GT_CACHE_DIR_NAME"]
+        else:
+            unit_test_dir = os.path.join(os.getcwd(), ".gt_cache")
+
+        cpython_id = "py{major}{minor}_{api}".format(
+            major=sys.version_info.major, minor=sys.version_info.minor, api=sys.api_version
+        )
+        backend = self.backend.replace(":", "")
+
+        unit_test_name = "unit_test.cpp"
+        unit_test_dir = (
+                os.path.join(unit_test_dir, cpython_id, backend, os.sep.join(components))
+                + "_pyext_BUILD"
+        )
+
+        data_dir = os.path.join(unit_test_dir, "data")
+        os.makedirs(data_dir, exist_ok=True)
+
+        arg_fields = []
+        for field_arg in field_args:
+            field = field_args[field_arg]
+            str_io = io.StringIO()
+            np.savetxt(str_io, field.data.flatten())
+
+            data_path = os.path.join(data_dir, f"{field_arg}.csv")
+            data_file = open(data_path, "w")
+            data_file.write(str_io.getvalue().replace("\n", ","))
+
+            arg_fields.append(
+                dict(
+                    name=field_arg,
+                    dtype=str(field.dtype),
+                    origin=origins[field_arg],
+                    shape=shapes[field_arg],
+                    stride=field.strides,
+                    size=field.size,
+                )
+            )
+
+        parameters = []
+        for param_arg in parameter_args:
+            param = parameter_args[param_arg]
+            parameters.append(dict(name=param_arg, dtype=type(param).__name__, value=str(param)))
+
+        template_args = dict(
+            arg_fields=arg_fields,
+            domain=tuple(domain),
+            parameters=parameters,
+            stencil_short_name=self.options["name"],
+            stencil_unique_name=self.__class__.__name__,
+        )
+
+        template_dir = gt_backend.GTPyExtGenerator.TEMPLATE_DIR
+        template_file = open(os.path.join(template_dir, f"{unit_test_name}.in"), "r")
+        template = jinja2.Template(template_file.read())
+        unit_test_source = template.render(**template_args)
+
+        unit_test_path = os.path.join(unit_test_dir, unit_test_name)
+        unit_test_file = open(unit_test_path, "w")
+        unit_test_file.write(unit_test_source)

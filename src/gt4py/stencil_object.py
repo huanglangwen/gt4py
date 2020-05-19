@@ -282,7 +282,6 @@ class StencilObject(abc.ABC):
 
         stencil_name = self.options["module"] + "." + self.options["name"]
 
-        out_fields = []
         if gt_backend.DEBUG_MODE:
             out_fields = self._write_unit_test(domain, origin, shapes, field_args, parameter_args)
 
@@ -360,6 +359,7 @@ class StencilObject(abc.ABC):
             out_fields=out_fields,
             stencil_short_name=self.options["name"],
             stencil_unique_name=self.__class__.__name__,
+            test_path=unit_test_dir,
         )
 
         template_dir = gt_backend.GTPyExtGenerator.TEMPLATE_DIR
@@ -383,9 +383,10 @@ class StencilObject(abc.ABC):
 
         return out_fields
 
-    def _write_output_test_data(self, out_fields: list):
+    def _write_output_test_data(self, out_fields: list, overwrite=False):
         for out_field in out_fields:
-            str_io = io.StringIO()
-            np.savetxt(str_io, out_field["data"].data.flatten())
-            data_file = open(out_field["path"], "w")
-            data_file.write(str_io.getvalue().replace("\n", ","))
+            if overwrite or not os.path.exists(out_field["path"]):
+                str_io = io.StringIO()
+                np.savetxt(str_io, out_field["data"].data.flatten())
+                data_file = open(out_field["path"], "w")
+                data_file.write(str_io.getvalue().replace("\n", ","))

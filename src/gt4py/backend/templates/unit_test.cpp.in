@@ -22,6 +22,7 @@
     - out_fields: [{ "name": str, "dtype": str }]
     - stencil_short_name: str
     - stencil_unique_name: str
+    - test_path: str
 #}
 #include "computation.hpp"
 
@@ -41,6 +42,8 @@ typedef double float64;
 
 const float32 float32_precision = 1e-6;
 const float64 float64_precision = 1e-10;
+
+const std::string test_path = "{{ test_path }}/";
 
 template <typename T>
 std::unique_ptr<std::vector<T>> read_csv(const std::string& csv_file) {
@@ -116,7 +119,7 @@ TEST(TestGT4Py, {{ stencil_short_name }}) {
           .count() * 1e-9);
 
 {% for field in out_fields -%}
-  auto {{ field.name }}_out = read_csv<{{ field.dtype }}>("data/{{ field.name }}_out.csv");
+  auto {{ field.name }}_out = read_csv<{{ field.dtype }}>(test_path + "data/{{ field.name }}_out.csv");
   if(!{{ field.name }}_out->empty()) {
     ASSERT_EQ({{ field.name }}->size(), {{ field.name }}_out->size());
     for (int i = 0; i < {{ field.name }}->size(); ++i) {
@@ -127,7 +130,7 @@ TEST(TestGT4Py, {{ stencil_short_name }}) {
   }
 {% endfor -%}
 
-  std::cerr << "{{ stencil_short_name }} run_time: "
+  std::cout << "{{ stencil_short_name }} run_time: "
             << end_run_time - start_run_time << std::endl;
 
   SUCCEED();

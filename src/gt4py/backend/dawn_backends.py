@@ -367,6 +367,16 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
                 assert False, "Wrong data_type for parameter"
             parameters.append({"name": parameter.name, "dtype": dtype})
 
+        # TODO: Compute these from extents...
+        stencil_halos = dict(
+            p_grad_c_ustencil=[1, 0, 0],
+            p_grad_c_vstencil=[0, 1, 0],
+        )
+        if stencil_short_name in stencil_halos:
+            halos = stencil_halos[stencil_short_name]
+        else:
+            halos = [0, 0, 0]
+
         template_args = dict(
             arg_fields=arg_fields,
             dawn_namespace=dawn_namespace,
@@ -376,7 +386,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
             parameters=parameters,
             stencil_short_name=stencil_short_name,
             stencil_unique_name=stencil_unique_name,
-            halos=[1, 0, 0],                            # TODO: Compute these from extents...
+            halos=halos,
         )
 
         for key, file_name in cls.TEMPLATE_FILES.items():

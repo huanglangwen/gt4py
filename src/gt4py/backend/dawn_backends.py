@@ -376,7 +376,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
             parameters=parameters,
             stencil_short_name=stencil_short_name,
             stencil_unique_name=stencil_unique_name,
-            halo_size=halo_size,
+            halos=[1, 0, 0],                            # TODO: Compute these from extents...
         )
 
         for key, file_name in cls.TEMPLATE_FILES.items():

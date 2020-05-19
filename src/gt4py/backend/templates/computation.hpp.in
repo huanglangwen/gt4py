@@ -25,15 +25,9 @@
 #include <gridtools/common/defs.hpp>
 #include <gridtools/common/gt_math.hpp>
 
-#include <boost/cstdfloat.hpp> {# #include <numpy/npy_common.h> #}
-
 #include <array>
 #include <cstdint>
 #include <vector>
-
-
-using boost::float32_t; {# using float32_t = npy_float32; #}
-using boost::float64_t; {# using float64_t = npy_float64; #}
 
 using py_size_t = std::intptr_t;
 

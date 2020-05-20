@@ -23,10 +23,9 @@
     - stencil_short_name: str
     - stencil_unique_name: str
     - test_path: str
+    - backend: str
 #}
 #include "computation.hpp"
-
-#include <gtest/gtest.h>
 
 #include <cmath>
 #include <fstream>
@@ -34,6 +33,11 @@
 #include <string>
 #include <vector>
 #include <chrono>
+
+{%- if "cuda" in backend %}
+#include <cuda.h>
+{%- endif %}
+#include <gtest/gtest.h>
 
 namespace {{ stencil_unique_name }}_pyext {
 
@@ -103,10 +107,24 @@ TEST(TestGT4Py, {{ stencil_short_name }}) {
 {% endfor -%}
 
 
+{%- if "cuda" in backend %}
+{% for field in arg_fields -%}
+  {{ field.dtype }}* d_{{ field.name }};
+  cudaMalloc((void**) &d_{{ field.name }}, {{ field.size }} * sizeof({{ field.dtype }}));
+  cudaMemcpy({{ field.name }}->data(), d_{{ field.name }}, {{ field.size }} * sizeof({{ field.dtype }}), cudaMemcpyHostToDevice);
+{% endfor -%}
+{%- endif %}
+
+
+{%- if "cuda" in backend %}
+{% for field in arg_fields -%}
+  auto bi_{{ field.name }} = BufferInfo{3, { {{ field.shape[0] }}, {{ field.shape[1] }}, {{ field.shape[2] }} }, { {{ field.stride[0] }}, {{ field.stride[1] }}, {{ field.stride[2] }} }, d_{{ field.name }}};
+{% endfor -%}
+{%- else %}
 {% for field in arg_fields -%}
   auto bi_{{ field.name }} = BufferInfo{3, { {{ field.shape[0] }}, {{ field.shape[1] }}, {{ field.shape[2] }} }, { {{ field.stride[0] }}, {{ field.stride[1] }}, {{ field.stride[2] }} }, {{ field.name }}->data()};
 {% endfor -%}
-
+{%- endif %}
 
   double start_run_time =
       static_cast<double>(
@@ -129,6 +147,19 @@ TEST(TestGT4Py, {{ stencil_short_name }}) {
       std::chrono::duration_cast<std::chrono::nanoseconds>(
           std::chrono::high_resolution_clock::now().time_since_epoch())
           .count() * 1e-9);
+
+
+{%- if "cuda" in backend %}
+{% for field in out_fields -%}
+cudaMemcpy(d_{{ field.name }}, {{ field.name }}->data(), {{ field.size }} * sizeof({{ field.dtype }}), cudaMemcpyDeviceToHost);
+{% endfor -%}
+
+{% for field in arg_fields -%}
+  {{ field.dtype }}* d_{{ field.name }};
+  cudaFree(d_{{ field.name }});
+{% endfor -%}
+{%- endif %}
+
 
 {% for field in out_fields -%}
   auto {{ field.name }}_out = read_csv<{{ field.dtype }}>(test_path + "data/{{ field.name }}_out.csv");

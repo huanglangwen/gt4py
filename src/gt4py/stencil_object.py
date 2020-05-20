@@ -360,6 +360,7 @@ class StencilObject(abc.ABC):
             stencil_short_name=self.options["name"],
             stencil_unique_name=self.__class__.__name__,
             test_path=unit_test_dir,
+            backend=self.backend,
         )
 
         template_dir = gt_backend.GTPyExtGenerator.TEMPLATE_DIR

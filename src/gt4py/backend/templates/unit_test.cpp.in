@@ -155,11 +155,9 @@ cudaMemcpy(d_{{ field.name }}, {{ field.name }}->data(), {{ field.size }} * size
 {% endfor -%}
 
 {% for field in arg_fields -%}
-  {{ field.dtype }}* d_{{ field.name }};
   cudaFree(d_{{ field.name }});
 {% endfor -%}
 {%- endif %}
-
 
 {% for field in out_fields -%}
   auto {{ field.name }}_out = read_csv<{{ field.dtype }}>(test_path + "data/{{ field.name }}_out.csv");

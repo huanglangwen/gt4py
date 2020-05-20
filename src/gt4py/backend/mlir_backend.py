@@ -41,6 +41,15 @@ DEFAULT_DIMENSIONS = 3
 DOMAIN_AXES = gt_definitions.CartesianSpace.names
 
 
+class AttrDict(dict):
+    __getattr__ = dict.__getitem__
+    __setattr__ = dict.__setitem__
+
+    def __init__(self, *args, **kwargs):
+        super(AttrDict, self).__init__(*args, **kwargs)
+        self.__dict__ = self
+
+
 class Intent(enum.Enum):
     IN = 0
     OUT = 1
@@ -53,10 +62,11 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         return cls()(definition_ir)
 
     def __call__(
-            self, definition_ir,
-            indent='  ',
-            field_size = DEFAULT_FIELD_SIZE,
-            halo_size = DEFAULT_HALO_SIZE
+        self,
+        definition_ir,
+        indent="  ",
+        field_size=DEFAULT_FIELD_SIZE,
+        halo_size=DEFAULT_HALO_SIZE,
     ):
         self.fields_ = []
         self.indent_ = indent
@@ -74,12 +84,12 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
 
         return self.visit(definition_ir)
 
-    def _add_operation(self, operation):
+    def _add_operation(self, operation: AttrDict):
         key = str(operation)
         if key in self.symbols_:
             id = self.symbols_[key]
         else:
-            type = operation["type"]
+            type = operation.node_type
             prefix = "exp"
             if type == gt_ir.ScalarLiteral:
                 prefix = "cst"
@@ -107,52 +117,53 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         key = str(operation)
         if not key in self.symbols_:
             self.symbols_[key] = id
-            type = operation["type"]
+            type = operation.node_type
 
             if type == gt_ir.ScalarLiteral:
-                # %cst0 = constant 4.0 : f64
-                code = f"%{id} = constant {operation['value']} : {operation['data_type']}"
+                # %cst0 = constant -4.000000e+00 : f64
+                op_val = "%e" % float(operation.value)
+                code = f"%{id} = constant {op_val} : {operation.data_type}"
+
             elif type == gt_ir.FieldRef:
-                # %a0 = stencil.access %arg1[0, 0, 0] : (!stencil.view<ijk,f64>) -> f64
-                field = self._get_field(operation["name"])
-                field_ref = self.field_refs_[field["name"]]
+                # %a0 = stencil.access %arg1[0, 0, 0] : (!stencil.temp<?x?x?xf64>) -> f64
+                field = self._get_field(operation.name)
+                field_ref = self.field_refs_[field.name]
                 arg_name = "arg%d" % field_ref
-                offset = ", ".join([str(index) for index in operation["offset"]])
-                view_type = f"!stencil.view<{field['dimensions']},{field['data_type']}>"
-                code = f"%{id} = stencil.access %{arg_name}[{offset}] : ({view_type}) -> {operation['data_type']}"
-            #elif type == gt_ir.VarRef:
-            #    code = ""
+                offset = ", ".join([str(index) for index in operation.offset])
+                temp_type = f"!stencil.temp<{field.dimensions}{field.data_type}>"
+                code = f"%{id} = stencil.access %{arg_name}[{offset}] : ({temp_type}) -> {operation.data_type}"
+
             elif type == gt_ir.BinOpExpr:
                 # Use type of LHS for now...
-                lhs = self.operations_[operation["lhs"]]
-                data_type = lhs["data_type"]
-
-                operator = operation["op"]
+                lhs = self.operations_[operation.lhs]
+                data_type = lhs.data_type
                 comp = ""
-                if operator == '+':
+                operator = operation.op
+
+                if operator == "+":
                     op_name = "add"
-                elif operator == '-':
+                elif operator == "-":
                     op_name = "sub"
-                elif operator == '*':
+                elif operator == "*":
                     op_name = "mul"
-                elif operator == '/':
+                elif operator == "/":
                     op_name = "div"
-                elif operator == '>':
+                elif operator == ">":
                     op_name = "cmp"
                     comp = "ogt"
-                elif operator == '<':
+                elif operator == "<":
                     op_name = "cmp"
                     comp = "olt"
-                elif operator == '>=':
+                elif operator == ">=":
                     op_name = "cmp"
                     comp = "oge"
-                elif operator == '<=':
+                elif operator == "<=":
                     op_name = "cmp"
                     comp = "ole"
-                elif operator == '==':
+                elif operator == "==":
                     op_name = "cmp"
                     comp = "eq"
-                elif operator == '!=':
+                elif operator == "!=":
                     op_name = "cmp"
                     comp = "ne"
                 else:
@@ -160,16 +171,17 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
 
                 op_name += data_type[0]
                 if len(comp) > 0:
-                    op_name += " \"%s\"" % comp
-                # %exp0 = subf %acc0, %acc1 : f64
-                code = f"%{id} = {op_name} %{operation['lhs']}, %{operation['rhs']} : {data_type}"
+                    op_name += ' "%s"' % comp
+                code = f"%{id} = {op_name}, %{operation.lhs}, %{operation.rhs} : {data_type}"
+
             elif type == gt_ir.TernaryOpExpr:
                 # %s0 = select %e3, %c0, %e0 : f64
-                code = f"%{id} = select %{operation['cond']}, %{operation['lhs']}, %{operation['rhs']} : {operation['data_type']}"
-            else:   # Expr
+                code = f"%{id} = select %{operation.cond}, %{operation.lhs}, %{operation.rhs} : {operation.data_type}"
+
+            else:  # Expr
                 raise NotImplementedError("Unimplemented node type '%s'" % str(type))
 
-            #operation["code"] = code
+            # operation["code"] = code
             self.body_.append(code)
             print(code)
 
@@ -177,7 +189,7 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
 
     def _get_field(self, name):
         for field in self.fields_:
-            if field["name"] == name:
+            if field.name == name:
                 return field
         return None
 
@@ -210,34 +222,27 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
 
     def visit_ScalarLiteral(self, node: gt_ir.ScalarLiteral, **kwargs):
         assert node.data_type != gt_ir.DataType.INVALID
-        literal_access_expr = {
-            'value': node.value,
-            'data_type': str(node.data_type).replace('FLOAT', 'f').replace('INT', 'i'),
-            'type': gt_ir.ScalarLiteral
-        }
-
+        literal_access_expr = AttrDict(
+            value=node.value,
+            data_type=str(node.data_type).replace("FLOAT", "f").replace("INT", "i"),
+            node_type=gt_ir.ScalarLiteral,
+        )
         id = self._add_operation(literal_access_expr)
-
         return literal_access_expr
 
     def visit_VarRef(self, node: gt_ir.VarRef, **kwargs):
-        var_access_expr = {
-            'name': node.name,
-            'is_external': True,
-            'type': gt_ir.VarRef
-        }
+        var_access_expr = AttrDict(name=node.name, is_external=True, type=gt_ir.VarRef)
         return var_access_expr
 
     def visit_FieldDecl(self, node: gt_ir.FieldDecl, **kwargs):
-        # NOTE Add unstructured support here
-        field = {
-            'name': node.name,
-            'dimensions': ''.join(node.axes).lower(),
-            'is_temporary': not node.is_api,
-            'data_type': str(node.data_type).replace('FLOAT', 'f'),
-            'intent': Intent.IN,
-            'type': gt_ir.FieldDecl
-        }
+        field = AttrDict(
+            name=node.name,
+            dimensions="?x" * len(node.axes),  # """.join(node.axes).lower(),
+            is_temporary=(not node.is_api),
+            data_type=str(node.data_type).replace("FLOAT", "f"),
+            intent=Intent.IN,
+            node_type=gt_ir.FieldDecl,
+        )
         self.fields_.append(field)
         return field
 
@@ -245,12 +250,9 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         field = self._get_field(node.name)
         offset = [node.offset[ax] if ax in node.offset else 0 for ax in DOMAIN_AXES]
 
-        field_access_expr = {
-            'name': node.name,
-            'offset': offset,
-            'data_type': field["data_type"],
-            'type': gt_ir.FieldRef
-        }
+        field_access_expr = AttrDict(
+            name=node.name, offset=offset, data_type=field.data_type, node_type=gt_ir.FieldRef
+        )
 
         id = self._add_operation(field_access_expr)
         if node.name not in self.field_refs_:
@@ -268,7 +270,7 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         left = self.visit(node.lhs)
         right = self.visit(node.rhs)
         op = node.op.python_symbol
-        if op == '**':
+        if op == "**":
             return self.visit_ExpOpExpr(left, right)
 
         # Pop two items off the stack...
@@ -281,13 +283,9 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         self._emit_operation(lhs)
         data_type = self.operations_[lhs]["data_type"]
 
-        bin_op_expr = {
-            'lhs': lhs,
-            'rhs': rhs,
-            'op': op,
-            'data_type': data_type,
-            'type': gt_ir.BinOpExpr
-        }
+        bin_op_expr = AttrDict(
+            lhs=lhs, rhs=rhs, op=op, data_type=data_type, node_type=gt_ir.BinOpExpr
+        )
 
         id = self._add_operation(bin_op_expr)
 
@@ -295,8 +293,8 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
 
     def visit_ExpOpExpr(self, left, right):
         exponent = right.value
-        if exponent == '2':
-            return sir_utils.make_binary_operator(left, '*', left)
+        if exponent == "2":
+            return sir_utils.make_binary_operator(left, "*", left)
         # Currently only support squares so raise error...
         raise RuntimeError("Unsupport exponential value: '%s'." % exponent)
 
@@ -318,26 +316,25 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         print("pop(%s)" % cexp)
         self._emit_operation(cexp)
 
-        ternary_op_expr = {
-            'lhs': lhs,
-            'rhs': rhs,
-            'cond': cexp,
-            'type': gt_ir.TernaryOpExpr
-        }
+        ternary_op_expr = AttrDict(
+            lhs=lhs,
+            rhs=rhs,
+            cond=cexp,
+            node_type=gt_ir.TernaryOpExpr,
+            data_type=self.operations_[lhs].data_type,
+        )
 
-        ternary_op_expr["data_type"] = self.operations_[lhs]["data_type"]
         id = self._add_operation(ternary_op_expr)
 
         return ternary_op_expr
 
     def visit_BlockStmt(self, node: gt_ir.BlockStmt, *, make_block=True, **kwargs):
-        stmts = [self.visit(stmt) for stmt in node.stmts] # if not isinstance(stmt, gt_ir.FieldDecl)]
+        statements = [
+            self.visit(stmt) for stmt in node.stmts
+        ]  # if not isinstance(stmt, gt_ir.FieldDecl)]
         if make_block:
-            stmts = {
-                'statements': stmts,
-                'type': gt_ir.BlockStmt
-            }
-        return stmts
+            stmts = AttrDict(statements=statements, node_type=gt_ir.BlockStmt)
+        return statements
 
     def visit_Assign(self, node: gt_ir.Assign, **kwargs):
         self.reset()
@@ -355,13 +352,12 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
 
         # rhs should be the return value for stencil.apply...
         rhs_op = self._emit_operation(rhs)
-        # stencil.return %e4 : f64
-        self.body_.append(f"stencil.return %{rhs} : {rhs_op['data_type']}")
+        self.body_.append(f"stencil.return %{rhs} : {rhs_op.data_type}")
 
         # Emit apply code...
         if self.file_:
-            # %lap = stencil.apply %arg1 = %input : !stencil.view<ijk,f64> {
-            out_name = lhs_op['name']
+            # %lap = stencil.apply %arg1 = %input : !stencil.temp<ijk,f64> {
+            out_name = lhs_op.name
             out_field = self._get_field(out_name)
 
             if out_name in self.out_counts_:
@@ -370,28 +366,27 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
             else:
                 self.out_counts_[out_name] = 0
 
-            line = f"  %{out_name} = stencil.apply "
+            out_field.data_type = "f64"  # TODO: Where is AUTO data type coming from?
+            temp_type = f"!stencil.temp<{out_field.dimensions}{out_field.data_type}>"
+            indent = self.indent_
+
+            line = (indent * 2) + f"%{out_name} = stencil.apply ("
             for field_name in self.field_refs_:
                 # TODO: Fix bug here, not all fields that are not output will be inputs to this stencil.apply ...
                 if field_name != out_name:
-                    line += "%%arg%d = %%%s, " % (self.field_refs_[field_name], field_name)
+                    line += f"%%arg%d = %%%s : {temp_type}, " % (
+                        self.field_refs_[field_name],
+                        field_name,
+                    )
 
-            out_field['data_type'] = 'f64'      # TODO: Where is AUTO data type coming from?
-            view_type = f"!stencil.view<{out_field['dimensions']},{out_field['data_type']}>"
-            line = line[0:len(line) - 2]  + f" : {view_type} " + "{\n"
+            line = line[0 : len(line) - 2] + f") -> {temp_type} " + "{\n"
             self.file_.write(line)
 
             for line in self.body_:
-                self.file_.write("    " + line + "\n")
-            # } : !stencil.view<ijk,f64>
-            self.file_.write("  } : " + view_type + "\n")
+                self.file_.write((indent * 3) + line + "\n")
+            self.file_.write((indent * 2) + "}\n")
 
-        assign_expr = {
-            'lhs': lhs,
-            'rhs': rhs,
-            'op': "=",
-            'type': gt_ir.Assign
-        }
+        assign_expr = AttrDict(lhs=lhs, rhs=rhs, op="=", node_type=gt_ir.Assign)
 
         return assign_expr
 
@@ -414,13 +409,13 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
     def visit_AxisInterval(self, node: gt_ir.AxisInterval, **kwargs):
         lower_level, lower_offset = self.visit(node.start)
         upper_level, upper_offset = self.visit(node.end)
-        interval = {
-            'lower_level': lower_level,
-            'upper_level': upper_level,
-            'lower_offset': lower_offset,
-            'upper_offset': upper_offset,
-            'type': gt_ir.AxisInterval
-        }
+        interval = AttrDict(
+            lower_level=lower_level,
+            upper_level=upper_level,
+            lower_offset=lower_offset,
+            upper_offset=upper_offset,
+            node_type=gt_ir.AxisInterval,
+        )
         return interval
 
     def visit_ComputationBlock(self, node: gt_ir.ComputationBlock, **kwargs):
@@ -428,11 +423,9 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         body_ast = self.visit(node.body, make_block=False)
         loop_order = node.iteration_order
 
-        vertical_region_stmt = {
-            'body_ast': body_ast,
-            'interval': interval,
-            'loop_order': loop_order
-        }
+        vertical_region_stmt = AttrDict(
+            body_ast=body_ast, interval=interval, loop_order=loop_order
+        )
 
         return vertical_region_stmt
 
@@ -448,38 +441,40 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         fields = [self.visit(field) for field in node.api_fields]
 
         if self.file_:
+            indent = self.indent_
             # TODO: Determine whether field is output based on AST traversal...
-            fields[-1]['intent'] = Intent.OUT
+            fields[-1].intent = Intent.OUT
 
             self.file_.write("module {\n")
-            self.file_.write(f"func @{stencil_name}(")
+            self.file_.write(indent + f"func @{stencil_name}(")
             field_defs = []
             for field in fields:
-                if not field['is_temporary']:
-                    field_defs.append(f"%{field['name']}_fd : !stencil.field<{field['dimensions']},{field['data_type']}>")
-            self.file_.write(", ".join(field_defs) + ")\n")
-            self.file_.write(self.indent_ + "attributes { stencil.program } {\n")
-
-            self.file_.write("\n")
+                if not field.is_temporary:
+                    field_defs.append(
+                        f"%{field.name}_fd : !stencil.field<{field.dimensions}{field.data_type}>"
+                    )
+            self.file_.write(", ".join(field_defs) + ") attributes { stencil.program } {\n")
 
             # Assert fields...
             for field in fields:
-                if not field['is_temporary']:
+                if not field.is_temporary:
                     # stencil.assert %input_fd ([-4, -4, -4]:[68, 68, 68]) : !stencil.field<ijk,f64>
                     halo_size = self.halo_size_
                     field_extent = halo_size + self.field_size_
-                    self.file_.write(f"  stencil.assert %{field['name']}_fd ([-{halo_size}, -{halo_size}, -{halo_size}]:[{field_extent}, {field_extent}, {field_extent}]) : !stencil.field<{field['dimensions']},{field['data_type']}>\n")
-
+                    self.file_.write(
+                        (indent * 2) + f"stencil.assert %{field.name}_fd ([-{halo_size}, -{halo_size}, -{halo_size}]:[{field_extent}, {field_extent}, {field_extent}]) : !stencil.field<{field.dimensions}{field.data_type}>\n"
+                    )
             self.file_.write("\n")
 
             # Load input fields...
             for field in fields:
-                if not field['is_temporary'] and field['intent'] == Intent.IN:
-                    # %input = stencil.load %input_fd : (!stencil.field<ijk,f64>) -> !stencil.view<ijk,f64>
-                    field_name = field['name']
-                    stencil_type = f"!stencil.field<{field['dimensions']},{field['data_type']}>"
-                    self.file_.write(f"  %{field_name} = stencil.load %{field_name}_fd : ({stencil_type}) -> {stencil_type}\n")
-
+                if not field.is_temporary and field.intent == Intent.IN:
+                    # %input = stencil.load %input_fd : (!stencil.field<ijk,f64>) -> !stencil.temp<ijk,f64>
+                    field_type = f"!stencil.field<{field.dimensions}{field.data_type}>"
+                    temp_type = f"!stencil.temp<{field.dimensions}{field.data_type}>"
+                    self.file_.write(
+                        (indent * 2) + f"%{field.name} = stencil.load %{field.name}_fd : ({field_type}) -> {temp_type}\n"
+                    )
             self.file_.write("\n")
 
         ast = [self.visit(computation) for computation in node.computations]
@@ -491,30 +486,27 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
             field_sizes = field_size_str + ", " + field_size_str + ", " + field_size_str
 
             for field in fields:
-                if not field['is_temporary'] and field['intent'] == Intent.OUT:
-                    # stencil.store %output to %output_fd ([0, 0, 0]:[64, 64, 64]) : !stencil.view<ijk,f64> to !stencil.field<ijk,f64>
-                    field_name = field['name']
-                    stencil_type = f"!stencil.field<{field['dimensions']},{field['data_type']}>"
+                if not field.is_temporary and field.intent == Intent.OUT:
+                    # stencil.store %output to %output_fd ([0, 0, 0]:[64, 64, 64]) : !stencil.temp<ijk,f64> to !stencil.field<ijk,f64>
+                    field_type = f"!stencil.field<{field.dimensions}{field.data_type}>"
+                    temp_type = f"!stencil.temp<{field.dimensions}{field.data_type}>"
                     self.file_.write(
-                        f"  stencil.store %{field_name} to %{field_name}_fd ([{origin}] : [{field_sizes}]) : ({stencil_type}) -> {stencil_type}\n")
+                        (indent * 2) + f"stencil.store %{field.name} to %{field.name}_fd([{origin}] : [{field_sizes}]) : {temp_type} -> {field_type}\n"
+                    )
 
-            self.file_.write("  return\n }\n}\n")
+            self.file_.write((indent * 2) + "return\n }\n}\n")
             self.file_.close()
 
-        stencil = {
-            'name': stencil_name,
-            'ast': ast,
-            'fields': fields
-        }
+        stencil = AttrDict(name=stencil_name, ast=ast, fields=fields)
         stencils.append(stencil)
 
-        mlir = {
-            'file_name': file_name,
-            'grid_type': 'Cartesian',
-            'functions': functions,
-            'stencils': stencils,
-            'global_variables': global_variables
-        }
+        mlir = AttrDict(
+            file_name=file_name,
+            grid_type="Cartesian",
+            functions=functions,
+            stencils=stencils,
+            global_variables=global_variables,
+        )
 
         return mlir
 
@@ -522,8 +514,8 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
 @gt_backend.register
 class MLIRBackend(gt_backend.BasePyExtBackend):
 
-    MLIR_BACKEND_NS = 'mlir'
-    MLIR_BACKEND_NAME = 'mlir'
+    MLIR_BACKEND_NS = "mlir"
+    MLIR_BACKEND_NAME = "mlir"
     MLIR_BACKEND_OPTS = {
         "add_profile_info": {"versioning": True},
         "clean": {"versioning": False},
@@ -591,7 +583,9 @@ class MLIRBackend(gt_backend.BasePyExtBackend):
         )
 
     @classmethod
-    def generate_extension_sources(cls, stencil_id, definition_ir, options, gt_backend_t, default_opts=True):
+    def generate_extension_sources(
+        cls, stencil_id, definition_ir, options, gt_backend_t, default_opts=True
+    ):
         mlir = MLIRConverter.apply(definition_ir)
         stencil_short_name = stencil_id.qualified_name.split(".")[-1]
 
@@ -610,28 +604,7 @@ class MLIRBackend(gt_backend.BasePyExtBackend):
             with open(dump_mlir_file, "w") as f:
                 f.write(json.puts(mlir))
 
-        # TODO
-
-        if default_opts:
-            backend_opts['set_stage_name'] = True
-            backend_opts['stage_reordering'] = True
-            backend_opts['reorder_strategy'] = 'greedy'
-            backend_opts['stage_merger'] = True
-            backend_opts['set_caches'] = True
-            backend_opts['set_block_size'] = True
-
-        # if dump_mlir_opt:
-        #     backend_opts['serialize_iir'] = True            # For debug...
-
-        # dawn_opts = {
-        #     key: value
-        #     for key, value in backend_opts.items()
-        #     if key in _DAWN_TOOLCHAIN_OPTIONS.keys()
-        # }
-        source = dawn4py.compile(mlir, **dawn_opts)
-        # if stencil_short_name == 'update_dz_c':
-        #    file = open('/home/eddied/Work/fv3ser/.gt_cache/py37_1013/dawnnaive/fv3/stencils/updatedzc/m_update_dz_c__dawnnaive_b83c31fdb3_pyext_BUILD/_dawn_update_dz_c_new.hpp', 'r')
-        #    source = file.read()
+        source = ""  # dawn4py.compile(mlir, **dawn_opts)
         stencil_unique_name = cls.get_pyext_class_name(stencil_id)
         module_name = cls.get_pyext_module_name(stencil_id)
         pyext_sources = {f"_dawn_{stencil_short_name}.hpp": source}
@@ -639,6 +612,7 @@ class MLIRBackend(gt_backend.BasePyExtBackend):
         dump_src_opt = backend_opts.get("dump_src", True)
         if dump_src_opt:
             import sys
+
             sys.stderr.write(source)
 
         arg_fields = [
@@ -665,7 +639,7 @@ class MLIRBackend(gt_backend.BasePyExtBackend):
 
         template_args = dict(
             arg_fields=arg_fields,
-            dawn_backend=dawn_backend,
+            backend=mlir_backend,
             gt_backend=gt_backend_t,
             header_file=header_file,
             module_name=module_name,

@@ -9,7 +9,7 @@ def hdiff(
     input: gtscript.Field[dtype], coeff: gtscript.Field[dtype], output: gtscript.Field[dtype]
 ):
     with computation(FORWARD), interval(...):
-        lap = 4.0 * input - (
+        lap = input * -4.0 + (
             input[-1, 0, 0] + input[1, 0, 0] + input[0, 1, 0] + input[0, -1, 0]
         )
         dx = lap[1, 0, 0] - lap

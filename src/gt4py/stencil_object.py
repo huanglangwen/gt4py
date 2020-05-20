@@ -283,7 +283,12 @@ class StencilObject(abc.ABC):
         stencil_name = self.options["module"] + "." + self.options["name"]
 
         if gt_backend.DEBUG_MODE:
-            out_fields = self._write_unit_test(domain, origin, shapes, field_args, parameter_args)
+            out_indices = [
+                field_idx for field_idx, field_arg in enumerate(field_args) if "out" in field_arg
+            ]
+            out_fields = self._write_unit_test(
+                domain, origin, shapes, field_args, parameter_args, out_indices=out_indices
+            )
 
         self.run(
             _domain_=domain, _origin_=origin, exec_info=exec_info, **field_args, **parameter_args
@@ -299,7 +304,7 @@ class StencilObject(abc.ABC):
         shapes: dict,
         field_args: dict,
         parameter_args: dict,
-        out_indices=[0],
+        out_indices=[],
     ):
         components = self.__class__.__module__.split(".")[1:]
         if "GT_CACHE_DIR_NAME" in os.environ:
@@ -323,6 +328,9 @@ class StencilObject(abc.ABC):
 
         arg_fields = []
         out_fields = []
+
+        if len(out_indices) < 1:
+            out_indices.append(0)
 
         for field_idx, field_arg in enumerate(field_args):
             field = field_args[field_arg]

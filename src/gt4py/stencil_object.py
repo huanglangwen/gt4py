@@ -345,7 +345,7 @@ class StencilObject(abc.ABC):
             )
 
             if field_idx in out_indices:
-                out_fields.append(dict(name=field_arg, dtype=str(field.dtype)))
+                out_fields.append(dict(name=field_arg, dtype=str(field.dtype), size=field.size))
 
         parameters = []
         for param_arg in parameter_args:

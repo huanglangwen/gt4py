@@ -19,7 +19,7 @@
     - arg_fields: [{ "name": str, "dtype": str, "size": int, "origin": [int, int, int], "shape": [int, int, int], "stride": [int, int, int] }]
     - domain: [int, int, int]
     - parameters: [{ "name": str, "dtype": str, "value": str }]
-    - out_fields: [{ "name": str, "dtype": str }]
+    - out_fields: [{ "name": str, "dtype": str, "size": int }]
     - stencil_short_name: str
     - stencil_unique_name: str
     - test_path: str
@@ -46,21 +46,6 @@ const float64 float64_precision = 1e-10;
 const std::string test_path = "{{ test_path }}/";
 
 template <typename T>
-std::unique_ptr<std::vector<T>> read_csv(const std::string& csv_file) {
-  auto data = std::unique_ptr<std::vector<T>>(new std::vector<T>{});
-  std::fstream fin(csv_file, std::ios::in);
-
-  if(fin.is_open()) {
-    std::string line;
-    while (std::getline(fin, line, ',')) {
-      data->push_back(std::stod(line));
-    }
-  }
-
-  return data;
-}
-
-template <typename T>
 bool compare_values(T expected, T actual, T precision) {
   if(std::fabs(expected) < 1e-3 && std::fabs(actual) < 1e-3) {
     if(std::fabs(expected - actual) < precision)
@@ -70,6 +55,33 @@ bool compare_values(T expected, T actual, T precision) {
       return true;
   }
   return false;
+}
+
+template <typename T>
+std::unique_ptr<std::vector<T>> read_csv(const std::string& csv_file) {
+  auto data = std::unique_ptr<std::vector<T>>(new std::vector<T>{});
+  std::fstream fin(csv_file, std::ios::in);
+  if(fin.is_open()) {
+    std::string line;
+    while (std::getline(fin, line, ',')) {
+      data->push_back(std::stod(line));
+    }
+  }
+  return data;
+}
+
+template <typename T, unsigned N>
+void write_csv(const std::string& csv_file, const std::unique_ptr<std::array<T, N>>& data) {
+  std::ofstream fout(csv_file);
+  if(fout.is_open()) {
+    fout.precision(18);
+    for(int i = 0; i < N; ++i) {
+      fout << std::scientific << data->at(i);
+      if(i < N - 1)
+        fout << ",";
+    }
+    fout << "\n";
+  }
 }
 
 TEST(TestGT4Py, {{ stencil_short_name }}) {
@@ -123,9 +135,12 @@ TEST(TestGT4Py, {{ stencil_short_name }}) {
   if(!{{ field.name }}_out->empty()) {
     ASSERT_EQ({{ field.name }}->size(), {{ field.name }}_out->size());
     for (int i = 0; i < {{ field.name }}->size(); ++i) {
-      ASSERT_TRUE(compare_values<{{ field.dtype }}>({{ field.name }}_out->at(i), {{ field.name }}->at(i),
-                  {{ field.dtype }}_precision)) << {{ field.name }}_out->at(i) << " !~ " <<
-                  {{ field.name }}->at(i) << " at " << i;
+      bool matched = compare_values<{{ field.dtype }}>({{ field.name }}_out->at(i), {{ field.name }}->at(i),
+                                    {{ field.dtype }}_precision);
+      if(!matched)
+        write_csv<{{ field.dtype }}, {{ field.size }}>(test_path + "data/{{ field.name }}_fail.csv", {{ field.name }});
+      ASSERT_TRUE(matched)  << {{ field.name }}_out->at(i) << " !~ " <<
+                               {{ field.name }}->at(i) << " at " << i;
     }
   }
 {% endfor -%}

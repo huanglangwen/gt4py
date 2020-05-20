@@ -331,7 +331,7 @@ class StencilObject(abc.ABC):
 
             data_path = os.path.join(data_dir, f"{field_arg}.csv")
             data_file = open(data_path, "w")
-            data_file.write(str_io.getvalue().replace("\n", ","))
+            data_file.write(str_io.getvalue().rstrip().replace("\n", ","))
 
             arg_fields.append(
                 dict(
@@ -390,4 +390,4 @@ class StencilObject(abc.ABC):
                 str_io = io.StringIO()
                 np.savetxt(str_io, out_field["data"].data.flatten())
                 data_file = open(out_field["path"], "w")
-                data_file.write(str_io.getvalue().replace("\n", ","))
+                data_file.write(str_io.getvalue().rstrip().replace("\n", ","))

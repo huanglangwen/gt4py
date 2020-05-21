@@ -436,7 +436,7 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         global_variables = self._make_global_variables(node.parameters, node.externals)
 
         stencil_name = node.name.split(".")[-1]
-        file_name = os.getcwd() + "/" + stencil_name + ".mlir"
+        file_name = os.path.join(os.getcwd(), "mlir", stencil_name + ".mlir")
         self.file_ = open(file_name, "w")
 
         fields = [self.visit(field) for field in node.api_fields]
@@ -604,10 +604,15 @@ class MLIRBackend(gt_backend.BasePyExtBackend):
         unroll_factor = 2
         unroll_index = 1
         optimizations = [
-            "--canonicalize", "--stencil-inlining", "--cse",
+            "--canonicalize",
+            "--stencil-inlining",
+            "--cse",
             "--pass-pipeline=stencil-unrolling{unroll-factor=%d unroll-index=%d}"
             % (unroll_factor, unroll_index),
-            "--stencil-shape-inference", "--cse", "--convert-stencil-to-std", "--cse",
+            "--stencil-shape-inference",
+            "--cse",
+            "--convert-stencil-to-std",
+            "--cse",
         ]
 
         is_cuda = "cuda" in mlir_backend
@@ -630,32 +635,36 @@ class MLIRBackend(gt_backend.BasePyExtBackend):
         # Perform stencil optimizations and lower MLIR
         mlir_in = mlir.file_name
         mlir_out = os.path.splitext(mlir_in)[0] + "_lower.mlir"
+        encoding = "utf-8"
 
         command = [tools.opt]
         command.extend(optimizations)
         command.extend([mlir_in])
-        output = sub.run(command, capture_output=True)
-        if len(output.stderr) > 0:  # Check for error...
-            raise RuntimeError("OEC-ERROR: " + str(output.stderr))
-        with open(mlir_out, "w") as out:
-            out.write(str(output.stdout, "utf-8"))
+        if not os.path.exists(mlir_out):
+            output = sub.run(command, capture_output=True)
+            if len(output.stderr) > 0:  # Check for error...
+                raise RuntimeError("OEC-ERROR: " + str(output.stderr, encoding))
+            with open(mlir_out, "w") as out:
+                out.write(str(output.stdout, encoding))
 
         # Translate lowered MLIR to LLVM
-        mlir_llvm = os.path.splitext(mlir_out)[0] + "_llvm.mlir"
+        mlir_llvm = os.path.splitext(mlir_in)[0] + "_llvm.mlir"
         command = [tools.translate, "--mlir-to-llvmir", mlir_out]
-        output = sub.run(command, capture_output=True)
-        if len(output.stderr) > 0:  # Check for error...
-            raise RuntimeError("MLIR-ERROR: " + str(output.stderr))
-        with open(mlir_llvm, "w") as out:
-            out.write(str(output.stdout, "utf-8"))
+        if not os.path.exists(mlir_llvm):
+            output = sub.run(command, capture_output=True)
+            if len(output.stderr) > 0:  # Check for error...
+                raise RuntimeError("MLIR-ERROR: " + str(output.stderr, encoding))
+            with open(mlir_llvm, "w") as out:
+                out.write(str(output.stdout, encoding))
 
         # Compile LLVM to assembly...
-        opt_level = "-O" + str(0 if gt_backend.DEBUG_MODE else 3) 
+        opt_level = "-O" + str(0 if gt_backend.DEBUG_MODE else 3)
         llvm_asm = os.path.splitext(mlir_llvm)[0] + ".s"
-        command = [tools.compile, opt_level, mlir_llvm, "-o", llvm_asm]
-        output = sub.run(command, capture_output=True)
-        if len(output.stderr) > 0:  # Check for error...
-            raise RuntimeError("LLVM-ERROR: " + str(output.stderr))
+        if not os.path.exists(llvm_asm):
+            command = [tools.compile, opt_level, mlir_llvm, "-o", llvm_asm]
+            output = sub.run(command, capture_output=True)
+            if len(output.stderr) > 0:  # Check for error...
+                raise RuntimeError("LLVM-ERROR: " + str(output.stderr, encoding))
 
         # Now how to combine all this with gt4py/pybind11 and compile with clang...
         # input1 = output
@@ -663,16 +672,14 @@ class MLIRBackend(gt_backend.BasePyExtBackend):
         # input3 = wrappers
         # replace_template_config(size, height, bound_size, type, abs_path(
         #    benchmarks, kernel + ".cpp"), input2, num_measurements)
-        binary = os.path.splitext(llvm_asm)[0] + ".x"
-        command = [tools.clang, opt_level]
+        binary = os.path.splitext(llvm_asm)[0] + ".o"
+        command = [tools.clang, "-c", opt_level]
         if is_cuda:
             command.extend(["-lcudart", "-lcuda"])
-        #import pdb; pdb.set_trace()
-        command.extend([llvm_asm, tools.wrapper, "-o", binary])
-        process = sub.Popen(command, stdout=sub.PIPE, stderr=sub.PIPE)
-        output, error = process.communicate()
-        if len(error) > 0:  # Check for error...
-            raise RuntimeError("CLANG-ERROR: " + error)
+        command.extend([llvm_asm, "-o", binary])
+        output = sub.run(command, capture_output=True)
+        if len(output.stderr) > 0:  # Check for error...
+            raise RuntimeError("CLANG-ERROR: " + str(output.stderr, encoding))
 
         source = ""  # dawn4py.compile(mlir, **dawn_opts)
         stencil_unique_name = cls.get_pyext_class_name(stencil_id)

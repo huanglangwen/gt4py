@@ -25,6 +25,7 @@ import types
 import enum
 import jinja2
 import numpy as np
+import subprocess as sub
 
 from collections import deque
 from collections import OrderedDict
@@ -462,7 +463,8 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
                     halo_size = self.halo_size_
                     field_extent = halo_size + self.field_size_
                     self.file_.write(
-                        (indent * 2) + f"stencil.assert %{field.name}_fd ([-{halo_size}, -{halo_size}, -{halo_size}]:[{field_extent}, {field_extent}, {field_extent}]) : !stencil.field<{field.dimensions}{field.data_type}>\n"
+                        (indent * 2)
+                        + f"stencil.assert %{field.name}_fd ([-{halo_size}, -{halo_size}, -{halo_size}]:[{field_extent}, {field_extent}, {field_extent}]) : !stencil.field<{field.dimensions}{field.data_type}>\n"
                     )
             self.file_.write("\n")
 
@@ -473,7 +475,8 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
                     field_type = f"!stencil.field<{field.dimensions}{field.data_type}>"
                     temp_type = f"!stencil.temp<{field.dimensions}{field.data_type}>"
                     self.file_.write(
-                        (indent * 2) + f"%{field.name} = stencil.load %{field.name}_fd : ({field_type}) -> {temp_type}\n"
+                        (indent * 2)
+                        + f"%{field.name} = stencil.load %{field.name}_fd : ({field_type}) -> {temp_type}\n"
                     )
             self.file_.write("\n")
 
@@ -491,7 +494,8 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
                     field_type = f"!stencil.field<{field.dimensions}{field.data_type}>"
                     temp_type = f"!stencil.temp<{field.dimensions}{field.data_type}>"
                     self.file_.write(
-                        (indent * 2) + f"stencil.store %{field.name} to %{field.name}_fd([{origin}] : [{field_sizes}]) : {temp_type} -> {field_type}\n"
+                        (indent * 2)
+                        + f"stencil.store %{field.name} to %{field.name}_fd([{origin}] : [{field_sizes}]) : {temp_type} -> {field_type}\n"
                     )
 
             self.file_.write((indent * 2) + "return\n }\n}\n")
@@ -519,8 +523,7 @@ class MLIRBackend(gt_backend.BasePyExtBackend):
     MLIR_BACKEND_OPTS = {
         "add_profile_info": {"versioning": True},
         "clean": {"versioning": False},
-        "debug_mode": {"versioning": True},
-        "dump_mlir": {"versioning": False},
+        "debug_mode": {"versioning": gt_backend.DEBUG_MODE},
         "verbose": {"versioning": False},
     }
 
@@ -560,11 +563,6 @@ class MLIRBackend(gt_backend.BasePyExtBackend):
 
         cls._check_options(options)
 
-        # ECD: GT backend not needed for MLIR...
-        # Generate the Python binary extension (checking if GridTools sources are installed)
-        # if not gt_src_manager.has_gt_sources() and not gt_src_manager.install_gt_sources():
-        #     raise RuntimeError("Missing GridTools sources.")
-
         module_kwargs = {"implementation_ir": None}
         pyext_module_name, pyext_file_path = cls.generate_extension(
             stencil_id, definition_ir, options, module_kwargs=module_kwargs
@@ -593,33 +591,101 @@ class MLIRBackend(gt_backend.BasePyExtBackend):
         backend_opts["backend"] = cls.MLIR_BACKEND_NAME
         mlir_backend = cls.MLIR_BACKEND_NS
 
-        dump_mlir_opt = backend_opts.get("dump_mlir", False)
-        if dump_mlir_opt:
-            if isinstance(dump_mlir_opt, str):
-                dump_mlir_file = dump_mlir_opt
-            else:
-                assert isinstance(dump_mlir_opt, bool)
-                dump_mlir_file = f"{stencil_short_name}_gt4py.mlir"
+        # Define tools
+        tools = AttrDict(
+            opt="oec-opt",
+            translate="mlir-translate",
+            compile="llc",
+            wrapper="../open-earth-compiler/runtime/oec-runtime.cpp",
+            clang="clang++-9",
+        )
 
-            with open(dump_mlir_file, "w") as f:
-                f.write(json.puts(mlir))
+        # Define optimizations
+        unroll_factor = 2
+        unroll_index = 1
+        optimizations = [
+            "--canonicalize --stencil-shape-inference --cse",
+            "--canonicalize --stencil-inlining --cse --stencil-shape-inference",
+            "--canonicalize --stencil-inlining --cse --pass-pipeline='stencil-unrolling{unroll-factor=%d unroll-index=%d}' --stencil-shape-inference --cse"
+            % (unroll_factor, unroll_index),
+            "--convert-stencil-to-std",
+            "--cse",
+        ]
+
+        is_cuda = "cuda" in mlir_backend
+        if is_cuda:
+            optimizations.extend(
+                ["--stencil-loop-mapping='block-sizes=128,1,1'", "--convert-parallel-loops-to-gpu"]
+            )
+
+        optimizations.extend(["--lower-affine", "--convert-scf-to-std"])
+
+        if is_cuda:
+            optimizations.extend(["--gpu-kernel-outlining"])
+
+        optimizations.extend(["--cse", "--canonicalize"])
+
+        if is_cuda:
+            optimizations.extend(
+                ["--stencil-gpu-to-cubin", "--stencil-gpu-to-cuda", "--cse", "--canonicalize"]
+            )
+
+        # Perform stencil optimizations and lower MLIR
+        mlir_in = mlir.file_name
+        mlir_out = os.path.splitext(mlir_in)[0] + "_lower.mlir"
+
+        command = [tools.opt]
+        command.extend(optimizations)
+        command.extend([mlir_in, " > ", mlir_out])
+        process = sub.Popen(command, stdout=sub.PIPE, stderr=sub.PIPE)
+        output, error = process.communicate()
+        if len(error) > 0:  # Check for error...
+            raise RuntimeError("OEC-ERROR: " + error)
+
+        # Translate lowered MLIR to LLVM
+        mlir_llvm = os.path.splitext(mlir_out)[0] + "_llvm.mlir"
+        command = [tools.translate, "--mlir-to-llvmir", mlir_out, " > ", mlir_llvm]
+        process = sub.Popen(command, stdout=sub.PIPE, stderr=sub.PIPE)
+        output, error = process.communicate()
+        if len(error) > 0:  # Check for error...
+            raise RuntimeError("MLIR-ERROR: " + error)
+
+        # Convert to assembly...
+        opt_level = "-O0" if gt_backend.DEBUG_MODE else "-O3"
+        llvm_asm = os.path.splitext(mlir_llvm)[0] + ".s"
+        command = [tools.compile, opt_level, mlir_llvm, "-o", llvm_asm]
+        process = sub.Popen(command, stdout=sub.PIPE, stderr=sub.PIPE)
+        output, error = process.communicate()
+        if len(error) > 0:  # Check for error...
+            raise RuntimeError("LLVM-ERROR: " + error)
+
+        # Now how to combine all this with gt4py/pybind11 and compile with clang...
+        # input1 = output
+        # input2 = abs_path(temp, experiment + ".cpp")
+        # input3 = wrappers
+        # replace_template_config(size, height, bound_size, type, abs_path(
+        #    benchmarks, kernel + ".cpp"), input2, num_measurements)
+        binary = os.path.splitext(llvm_asm)[0] + ".x"
+        command = [tools.clang, opt_level]
+        if is_cuda:
+            command.extend(["-lcudart", "-lcuda"])
+        command.extend([llvm_asm, tools.wrapper, "-o", binary])
+        process = sub.Popen(command, stdout=sub.PIPE, stderr=sub.PIPE)
+        output, error = process.communicate()
+        if len(error) > 0:  # Check for error...
+            raise RuntimeError("CLANG-ERROR: " + error)
 
         source = ""  # dawn4py.compile(mlir, **dawn_opts)
         stencil_unique_name = cls.get_pyext_class_name(stencil_id)
         module_name = cls.get_pyext_module_name(stencil_id)
         pyext_sources = {f"_dawn_{stencil_short_name}.hpp": source}
 
-        dump_src_opt = backend_opts.get("dump_src", True)
-        if dump_src_opt:
-            import sys
-
-            sys.stderr.write(source)
-
         arg_fields = [
             {"name": field.name, "dtype": cls._DATA_TYPE_TO_CPP[field.data_type], "layout_id": i}
             for i, field in enumerate(definition_ir.api_fields)
         ]
         header_file = "computation.hpp"
+
         parameters = []
         for parameter in definition_ir.parameters:
             if parameter.data_type in [gt_ir.DataType.BOOL]:
@@ -777,7 +843,7 @@ class MLIRBackend(gt_backend.BasePyExtBackend):
         pyext_opts = dict(
             verbose=options.backend_opts.get("verbose", False),
             clean=options.backend_opts.get("clean", False),
-            debug_mode=options.backend_opts.get("debug_mode", True),
+            debug_mode=options.backend_opts.get("debug_mode", gt_backend.DEBUG_MODE),
             add_profile_info=options.backend_opts.get("add_profile_info", False),
         )
         include_dirs = [

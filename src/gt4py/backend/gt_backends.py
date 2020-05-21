@@ -163,6 +163,7 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
     }
 
     DATA_TYPE_TO_CPP = {
+        gt_ir.DataType.BOOL: "bool",
         gt_ir.DataType.INT8: "int8_t",
         gt_ir.DataType.INT16: "int16_t",
         gt_ir.DataType.INT32: "int32_t",
@@ -226,6 +227,15 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
         result = "{t} {name}:".format(t=self.DATA_TYPE_TO_CPP[decl.data_type], name=decl.name)
 
         return result
+
+    def visit_BuiltinLiteral(self, node: gt_ir.BuiltinLiteral):
+        if node.value == gt_ir.Builtin.TRUE:
+            source = "true"
+        elif node.value == gt_ir.Builtin.FALSE:
+            source = "false"
+        else:  # Builtin.NONE
+            source = "nullptr"
+        return source
 
     def visit_ScalarLiteral(self, node: gt_ir.ScalarLiteral):
         source = "{dtype}{{{value}}}".format(

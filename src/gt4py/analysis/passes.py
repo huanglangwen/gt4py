@@ -683,12 +683,24 @@ class DataTypePass(TransformPass):
 
         def visit_TernaryOpExpr(self, node: gt_ir.TernaryOpExpr, **kwargs):
             self.generic_visit(node, **kwargs)
-            assert node.then_expr.data_type is not gt_ir.DataType.AUTO
-            assert node.else_expr.data_type is not gt_ir.DataType.AUTO
-            assert node.condition.data_type is not gt_ir.DataType.AUTO
-            node.data_type = gt_ir.DataType.merge(
-                node.then_expr.data_type, node.else_expr.data_type
+            assert (
+                type(node.then_expr) == gt_ir.BuiltinLiteral
+                or node.then_expr.data_type is not gt_ir.DataType.AUTO
             )
+            assert (
+                type(node.else_expr) == gt_ir.BuiltinLiteral
+                or node.else_expr.data_type is not gt_ir.DataType.AUTO
+            )
+            assert node.condition.data_type is not gt_ir.DataType.AUTO
+            if (
+                type(node.then_expr) == gt_ir.BuiltinLiteral
+                or type(node.else_expr) == gt_ir.BuiltinLiteral
+            ):
+                node.data_type = gt_ir.DataType.BOOL
+            else:
+                node.data_type = gt_ir.DataType.merge(
+                    node.then_expr.data_type, node.else_expr.data_type
+                )
 
     def apply(self, transform_data: TransformData):
         collect_data_type = self.CollectDataTypes()

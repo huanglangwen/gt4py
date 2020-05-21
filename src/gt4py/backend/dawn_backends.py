@@ -96,6 +96,15 @@ class SIRConverter(gt_ir.IRNodeVisitor):
 
         return global_variables
 
+    def visit_BuiltinLiteral(self, node: gt_ir.BuiltinLiteral):
+        if node.value == gt_ir.Builtin.TRUE:
+            source = "true"
+        elif node.value == gt_ir.Builtin.FALSE:
+            source = "false"
+        else:  # Builtin.NONE
+            source = "nullptr"
+        return sir_utils.make_literal_access_expr(source, type=SIR.BuiltinType.Boolean)
+
     def visit_ScalarLiteral(self, node: gt_ir.ScalarLiteral, **kwargs):
         assert node.data_type != gt_ir.DataType.INVALID
         if node.data_type in (gt_ir.DataType.AUTO, gt_ir.DataType.DEFAULT):
@@ -247,6 +256,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
     }
 
     _DATA_TYPE_TO_CPP = {
+        gt_ir.DataType.BOOL: "bool",
         gt_ir.DataType.INT8: "int",
         gt_ir.DataType.INT16: "int",
         gt_ir.DataType.INT32: "int",

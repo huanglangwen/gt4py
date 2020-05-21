@@ -604,12 +604,10 @@ class MLIRBackend(gt_backend.BasePyExtBackend):
         unroll_factor = 2
         unroll_index = 1
         optimizations = [
-            "--canonicalize --stencil-shape-inference --cse",
-            "--canonicalize --stencil-inlining --cse --stencil-shape-inference",
-            "--canonicalize --stencil-inlining --cse --pass-pipeline='stencil-unrolling{unroll-factor=%d unroll-index=%d}' --stencil-shape-inference --cse"
+            "--canonicalize", "--stencil-inlining", "--cse",
+            "--pass-pipeline=stencil-unrolling{unroll-factor=%d unroll-index=%d}"
             % (unroll_factor, unroll_index),
-            "--convert-stencil-to-std",
-            "--cse",
+            "--stencil-shape-inference", "--cse", "--convert-stencil-to-std", "--cse",
         ]
 
         is_cuda = "cuda" in mlir_backend
@@ -617,18 +615,17 @@ class MLIRBackend(gt_backend.BasePyExtBackend):
             optimizations.extend(
                 ["--stencil-loop-mapping='block-sizes=128,1,1'", "--convert-parallel-loops-to-gpu"]
             )
-
         optimizations.extend(["--lower-affine", "--convert-scf-to-std"])
 
         if is_cuda:
             optimizations.extend(["--gpu-kernel-outlining"])
-
         optimizations.extend(["--cse", "--canonicalize"])
 
         if is_cuda:
             optimizations.extend(
                 ["--stencil-gpu-to-cubin", "--stencil-gpu-to-cuda", "--cse", "--canonicalize"]
             )
+        optimizations.extend(["--convert-std-to-llvm=emit-c-wrappers"])
 
         # Perform stencil optimizations and lower MLIR
         mlir_in = mlir.file_name
@@ -636,28 +633,29 @@ class MLIRBackend(gt_backend.BasePyExtBackend):
 
         command = [tools.opt]
         command.extend(optimizations)
-        command.extend([mlir_in, " > ", mlir_out])
-        process = sub.Popen(command, stdout=sub.PIPE, stderr=sub.PIPE)
-        output, error = process.communicate()
-        if len(error) > 0:  # Check for error...
-            raise RuntimeError("OEC-ERROR: " + error)
+        command.extend([mlir_in])
+        output = sub.run(command, capture_output=True)
+        if len(output.stderr) > 0:  # Check for error...
+            raise RuntimeError("OEC-ERROR: " + str(output.stderr))
+        with open(mlir_out, "w") as out:
+            out.write(str(output.stdout, "utf-8"))
 
         # Translate lowered MLIR to LLVM
         mlir_llvm = os.path.splitext(mlir_out)[0] + "_llvm.mlir"
-        command = [tools.translate, "--mlir-to-llvmir", mlir_out, " > ", mlir_llvm]
-        process = sub.Popen(command, stdout=sub.PIPE, stderr=sub.PIPE)
-        output, error = process.communicate()
-        if len(error) > 0:  # Check for error...
-            raise RuntimeError("MLIR-ERROR: " + error)
+        command = [tools.translate, "--mlir-to-llvmir", mlir_out]
+        output = sub.run(command, capture_output=True)
+        if len(output.stderr) > 0:  # Check for error...
+            raise RuntimeError("MLIR-ERROR: " + str(output.stderr))
+        with open(mlir_llvm, "w") as out:
+            out.write(str(output.stdout, "utf-8"))
 
-        # Convert to assembly...
-        opt_level = "-O0" if gt_backend.DEBUG_MODE else "-O3"
+        # Compile LLVM to assembly...
+        opt_level = "-O" + str(0 if gt_backend.DEBUG_MODE else 3) 
         llvm_asm = os.path.splitext(mlir_llvm)[0] + ".s"
         command = [tools.compile, opt_level, mlir_llvm, "-o", llvm_asm]
-        process = sub.Popen(command, stdout=sub.PIPE, stderr=sub.PIPE)
-        output, error = process.communicate()
-        if len(error) > 0:  # Check for error...
-            raise RuntimeError("LLVM-ERROR: " + error)
+        output = sub.run(command, capture_output=True)
+        if len(output.stderr) > 0:  # Check for error...
+            raise RuntimeError("LLVM-ERROR: " + str(output.stderr))
 
         # Now how to combine all this with gt4py/pybind11 and compile with clang...
         # input1 = output
@@ -669,6 +667,7 @@ class MLIRBackend(gt_backend.BasePyExtBackend):
         command = [tools.clang, opt_level]
         if is_cuda:
             command.extend(["-lcudart", "-lcuda"])
+        #import pdb; pdb.set_trace()
         command.extend([llvm_asm, tools.wrapper, "-o", binary])
         process = sub.Popen(command, stdout=sub.PIPE, stderr=sub.PIPE)
         output, error = process.communicate()

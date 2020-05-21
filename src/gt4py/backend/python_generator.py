@@ -118,6 +118,15 @@ class PythonSourceGenerator(gt_ir.IRNodeVisitor):
     def visit_Statement(self, node: gt_ir.Statement):
         raise NotImplementedError()
 
+    def visit_BuiltinLiteral(self, node: gt_ir.BuiltinLiteral):
+        if node.value == gt_ir.Builtin.TRUE:
+            source = "True"
+        elif node.value == gt_ir.Builtin.FALSE:
+            source = "False"
+        else:  # Builtin.NONE
+            source = "None"
+        return source
+
     def visit_ScalarLiteral(self, node: gt_ir.ScalarLiteral):
         return str(node.value)
 

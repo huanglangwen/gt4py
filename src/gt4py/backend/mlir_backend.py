@@ -172,8 +172,8 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
 
                 op_name += data_type[0]
                 if len(comp) > 0:
-                    op_name += ' "%s"' % comp
-                code = f"%{id} = {op_name}, %{operation.lhs}, %{operation.rhs} : {data_type}"
+                    op_name += ' "%s",' % comp
+                code = f"%{id} = {op_name} %{operation.lhs}, %{operation.rhs} : {data_type}"
 
             elif type == gt_ir.TernaryOpExpr:
                 # %s0 = select %e3, %c0, %e0 : f64
@@ -495,7 +495,7 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
                     temp_type = f"!stencil.temp<{field.dimensions}{field.data_type}>"
                     self.file_.write(
                         (indent * 2)
-                        + f"stencil.store %{field.name} to %{field.name}_fd([{origin}] : [{field_sizes}]) : {temp_type} -> {field_type}\n"
+                        + f"stencil.store %{field.name} to %{field.name}_fd([{origin}] : [{field_sizes}]) : {temp_type} to {field_type}\n"
                     )
 
             self.file_.write((indent * 2) + "return\n }\n}\n")

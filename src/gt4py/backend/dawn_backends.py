@@ -528,7 +528,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
         pyext_opts = dict(
             verbose=options.backend_opts.get("verbose", False),
             clean=options.backend_opts.get("clean", False),
-            debug_mode=options.backend_opts.get("debug_mode", gt_backend.DEBUG_MODE),
+            debug_mode=options.backend_opts.get("debug_mode", False),
             add_profile_info=options.backend_opts.get("add_profile_info", False),
         )
         include_dirs = [

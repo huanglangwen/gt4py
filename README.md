@@ -1,4 +1,4 @@
-![](https://github.com/GridTools/gt4py/workflows/gt4py-tox/badge.svg?branch=master)
+![](https://github.com/GridTools/gt4py/workflows/Tox%20(CPU%20only)/badge.svg?branch=master)
 
 GT4Py: GridTools for Python
 ===========================
@@ -41,6 +41,14 @@ GT4Py contains a standard `setup.py` installation script that might be
 installed as usual with *pip*. Additional commands are provided to
 install and remove the GridTools C++ sources, which are not
 contained in the package. 
+
+_**IMPORTANT:**_ if the user provides a custom installation of GridTools C++
+sources, it should be compatible with the latest stable release of GridTools,
+which is the version targeted by GT4Py. Note that a compilation problem may
+also appear if there is a different GridTools C++ version installed in a
+standard prefix (e.g. `/usr/local`) which could be included in user-provided
+or standard `setuptools` include paths (for example if _Boost_ is installed in
+the same prefix).
 
 As usual in Python, we strongly recommended to create a new virtual environment for
 any project:
@@ -121,7 +129,7 @@ and then install the additional development requirements with:
 and then build the docs with:
 
     cd gt4py/docs
-    ./build.sh
+    make html  # run 'make help' for a list of targets
 
 
 Development roadmap

@@ -282,7 +282,8 @@ class StencilObject(abc.ABC):
 
         stencil_name = self.options["module"] + "." + self.options["name"]
 
-        if gt_backend.DEBUG_MODE:
+        debug_mode = "debug_mode" in self.options and self.options["debug_mode"]
+        if debug_mode:
             out_indices = [
                 field_idx for field_idx, field_arg in enumerate(field_args) if "out" in field_arg
             ]
@@ -294,7 +295,7 @@ class StencilObject(abc.ABC):
             _domain_=domain, _origin_=origin, exec_info=exec_info, **field_args, **parameter_args
         )
 
-        if gt_backend.DEBUG_MODE:
+        if debug_mode:
             self._write_output_test_data(out_fields)
 
     def _write_unit_test(

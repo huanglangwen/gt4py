@@ -35,7 +35,6 @@ from gt4py import ir as gt_ir
 from gt4py import utils as gt_utils
 
 DOMAIN_AXES = gt_definitions.CartesianSpace.names
-DUMP_SIR = False
 
 
 def _enum_dict(enum):
@@ -239,8 +238,8 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
     DAWN_BACKEND_OPTS = {
         "add_profile_info": {"versioning": True},
         "clean": {"versioning": False},
-        "debug_mode": {"versioning": gt_backend.DEBUG_MODE},
-        "dump_sir": {"versioning": DUMP_SIR},
+        "debug_mode": {"versioning": True},
+        "dump_sir": {"versioning": False},
         "verbose": {"versioning": False},
     }
 
@@ -299,9 +298,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
         )
 
     @classmethod
-    def generate_extension_sources(
-        cls, stencil_id, definition_ir, options, gt_backend_t, halo_size=0
-    ):
+    def generate_extension_sources(cls, stencil_id, definition_ir, options, gt_backend_t):
         sir = convert_to_SIR(definition_ir)
         stencil_short_name = stencil_id.qualified_name.split(".")[-1]
 
@@ -309,7 +306,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
         backend_opts["backend"] = cls.DAWN_BACKEND_NAME
         dawn_namespace = cls.DAWN_BACKEND_NS
 
-        dump_sir_opt = backend_opts.get("dump_sir", DUMP_SIR)
+        dump_sir_opt = backend_opts.get("dump_sir", False)
         if dump_sir_opt:
             if isinstance(dump_sir_opt, str):
                 dump_sir_file = dump_sir_opt
@@ -349,11 +346,6 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
         stencil_unique_name = cls.get_pyext_class_name(stencil_id)
         module_name = cls.get_pyext_module_name(stencil_id)
         pyext_sources = {f"_dawn_{stencil_short_name}.hpp": source}
-
-        dump_src_opt = backend_opts.get("dump_src", False)
-        if dump_src_opt:
-            import sys
-            sys.stderr.write(source)
 
         arg_fields = [
             {"name": field.name, "dtype": cls._DATA_TYPE_TO_CPP[field.data_type], "layout_id": i}
@@ -528,7 +520,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
         pyext_opts = dict(
             verbose=options.backend_opts.get("verbose", False),
             clean=options.backend_opts.get("clean", False),
-            debug_mode=options.backend_opts.get("debug_mode", gt_backend.DEBUG_MODE),
+            debug_mode=options.backend_opts.get("debug_mode", False),
             add_profile_info=options.backend_opts.get("add_profile_info", False),
         )
         include_dirs = [
@@ -560,7 +552,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
 _DAWN_BASE_OPTIONS = {
     "add_profile_info": {"versioning": True},
     "clean": {"versioning": False},
-    "debug_mode": {"versioning": gt_backend.DEBUG_MODE},
+    "debug_mode": {"versioning": True},
     "dump_sir": {"versioning": False},
     "verbose": {"versioning": False},
 }
@@ -576,8 +568,9 @@ for name in dir(dawn4py.CodeGenOptions) + dir(dawn4py.OptimizerOptions):
         or name.startswith("deserialize")
     ):
         _DAWN_TOOLCHAIN_OPTIONS[name] = {"versioning": False}
-    elif not name.startswith("_"):
+    elif not name.startswith("_") and name != "backend":
         _DAWN_TOOLCHAIN_OPTIONS[name] = {"versioning": True}
+
 
 _DAWN_BACKEND_OPTIONS = {**_DAWN_BASE_OPTIONS, **_DAWN_TOOLCHAIN_OPTIONS}
 

@@ -239,7 +239,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
     DAWN_BACKEND_OPTS = {
         "add_profile_info": {"versioning": True},
         "clean": {"versioning": False},
-        "debug_mode": {"versioning": False},
+        "debug_mode": {"versioning": gt_backend.DEBUG_MODE},
         "dump_sir": {"versioning": DUMP_SIR},
         "verbose": {"versioning": False},
     }
@@ -560,7 +560,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
 _DAWN_BASE_OPTIONS = {
     "add_profile_info": {"versioning": True},
     "clean": {"versioning": False},
-    "debug_mode": {"versioning": False},
+    "debug_mode": {"versioning": gt_backend.DEBUG_MODE},
     "dump_sir": {"versioning": False},
     "verbose": {"versioning": False},
 }

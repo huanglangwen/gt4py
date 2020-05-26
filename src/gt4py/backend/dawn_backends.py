@@ -143,9 +143,17 @@ class SIRConverter(gt_ir.IRNodeVisitor):
 
     def visit_ExpOpExpr(self, left, right):
         exponent = right.value
+        if exponent == "0":
+            return sir_utils.make_literal_access_expr("1", type=SIR.BuiltinType.Integer)
+        if exponent == "1":
+            return sir_utils.make_unary_operator("+", left)
         if exponent == "2":
             return sir_utils.make_binary_operator(left, "*", left)
-        # Currently only support squares so raise error...
+        elif exponent == "3":
+            return sir_utils.make_binary_operator(
+                left, "*", sir_utils.make_binary_operator(left, "*", left)
+            )
+        # Currently only support powers 1-3 so raise error...
         raise RuntimeError("Unsupport exponential value: '%s'." % exponent)
 
     def visit_TernaryOpExpr(self, node: gt_ir.TernaryOpExpr, **kwargs):
@@ -318,9 +326,9 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
                 f.write(sir_utils.to_json(sir))
 
         # Get list of pass groups
-        pass_groups = []
-        if "default_opt" in backend_opts:
-            pass_groups = dawn4py.default_pass_groups()
+        pass_groups = dawn4py.default_pass_groups()
+        if "no_opt" in backend_opts:
+            pass_groups = []
         elif "opt_groups" in backend_opts:
             pass_groups = [DAWN_PASS_GROUPS[k] for k in backend_opts["opt_groups"]]
             if "default_opt" in backend_opts:
@@ -370,10 +378,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
             parameters.append({"name": parameter.name, "dtype": dtype})
 
         # TODO: Compute these from extents...
-        stencil_halos = dict(
-            p_grad_c_ustencil=[1, 0, 0],
-            p_grad_c_vstencil=[0, 1, 0],
-        )
+        stencil_halos = dict(p_grad_c_ustencil=[1, 0, 0], p_grad_c_vstencil=[0, 1, 0])
         if stencil_short_name in stencil_halos:
             halos = stencil_halos[stencil_short_name]
         else:

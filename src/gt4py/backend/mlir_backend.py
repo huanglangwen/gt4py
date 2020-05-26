@@ -523,7 +523,7 @@ class MLIRBackend(gt_backend.BasePyExtBackend):
     MLIR_BACKEND_OPTS = {
         "add_profile_info": {"versioning": True},
         "clean": {"versioning": False},
-        "debug_mode": {"versioning": gt_backend.DEBUG_MODE},
+        "debug_mode": {"versioning": True},
         "verbose": {"versioning": False},
     }
 
@@ -658,7 +658,8 @@ class MLIRBackend(gt_backend.BasePyExtBackend):
                 out.write(str(output.stdout, encoding))
 
         # Compile LLVM to assembly...
-        opt_level = "-O" + str(0 if gt_backend.DEBUG_MODE else 3)
+        debug_mode = options.backend_opts.get("debug_mode", False),
+        opt_level = "-O" + str(0 if debug_mode else 3)
         llvm_asm = os.path.splitext(mlir_llvm)[0] + ".s"
         if not os.path.exists(llvm_asm):
             command = [tools.compile, opt_level, mlir_llvm, "-o", llvm_asm]

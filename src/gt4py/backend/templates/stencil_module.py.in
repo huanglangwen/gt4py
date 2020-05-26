@@ -114,18 +114,12 @@ class {{ class_name }}(StencilObject):
 {%- endfilter %}
 
     def run(self, _domain_, _origin_, exec_info, *, {{- field_names|join(", ") -}}, {{- param_names|join(", ") -}}):
-        run_start_time = time.perf_counter()
         if exec_info is not None:
             exec_info["domain"] = _domain_
             exec_info["origin"] = _origin_
-            exec_info["run_start_time"] = run_start_time
+            exec_info["run_start_time"] = time.perf_counter()
 {%- filter indent(width=8) %}
 {{- implementation }}
 {%- endfilter %}
-        run_end_time = time.perf_counter()
         if exec_info is not None:
-            exec_info["run_end_time"] = run_end_time
-
-        log = open("/tmp/timings.log", "a")
-        log.write("%s [INFO] {{ gt_backend }}:{{ gt_options.name }} run in %.6lf\n" %
-                 (str(time.time()), run_end_time - run_start_time))
+            exec_info["run_end_time"] = time.perf_counter()

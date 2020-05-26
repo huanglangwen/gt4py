@@ -34,7 +34,6 @@ from gt4py import utils as gt_utils
 from . import pyext_builder
 
 
-DEBUG_MODE = False
 REGISTRY = gt_utils.Registry()
 
 

@@ -153,8 +153,8 @@ class SIRConverter(gt_ir.IRNodeVisitor):
             return sir_utils.make_binary_operator(
                 left, "*", sir_utils.make_binary_operator(left, "*", left)
             )
-        # Currently only support powers 1-3 so raise error...
-        raise RuntimeError("Unsupport exponential value: '%s'." % exponent)
+        else:
+            return sir_utils.make_fun_call_expr("gridtools::dawn::math::pow", [left, right])
 
     def visit_TernaryOpExpr(self, node: gt_ir.TernaryOpExpr, **kwargs):
         cond = self.visit(node.condition)

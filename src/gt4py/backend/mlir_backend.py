@@ -455,8 +455,10 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         if self.file_:
             indent = self.indent_
             # TODO: Determine whether field is output based on AST traversal...
-            if stencil_name == 'pgradc':
+            if 'Grad' in stencil_name:
                 fields[0].intent = fields[1].intent = Intent.INOUT
+            elif 'UV' in stencil_name:
+                fields[-2].intent = fields[-1].intent = Intent.OUT
             else:
                 fields[-1].intent = Intent.OUT
 

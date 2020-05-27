@@ -153,8 +153,8 @@ class SIRConverter(gt_ir.IRNodeVisitor):
             return sir_utils.make_binary_operator(
                 left, "*", sir_utils.make_binary_operator(left, "*", left)
             )
-        # Currently only support powers 1-3 so raise error...
-        raise RuntimeError("Unsupport exponential value: '%s'." % exponent)
+        else:
+            return sir_utils.make_fun_call_expr("gridtools::dawn::math::pow", [left, right])
 
     def visit_TernaryOpExpr(self, node: gt_ir.TernaryOpExpr, **kwargs):
         cond = self.visit(node.condition)
@@ -236,20 +236,38 @@ class SIRConverter(gt_ir.IRNodeVisitor):
         return sir
 
 
-convert_to_SIR = SIRConverter.apply
+_DAWN_BASE_OPTIONS = {
+    "add_profile_info": {"versioning": True},
+    "clean": {"versioning": False},
+    "debug_mode": {"versioning": True},
+    "dump_sir": {"versioning": False},
+    "verbose": {"versioning": False},
+    "no_opt": {"versioning": False},
+}
+
+
+_DAWN_TOOLCHAIN_OPTIONS = {}
+for name in dir(dawn4py.CodeGenOptions) + dir(dawn4py.OptimizerOptions):
+    if (
+        name.startswith("print")
+        or name.startswith("dump")
+        or name.startswith("report")
+        or name.startswith("serialize")
+        or name.startswith("deserialize")
+    ):
+        _DAWN_TOOLCHAIN_OPTIONS[name] = {"versioning": False}
+    elif not name.startswith("_") and name != "backend":
+        _DAWN_TOOLCHAIN_OPTIONS[name] = {"versioning": True}
+
+
+_DAWN_BACKEND_OPTIONS = {**_DAWN_BASE_OPTIONS, **_DAWN_TOOLCHAIN_OPTIONS}
 
 
 class BaseDawnBackend(gt_backend.BasePyExtBackend):
 
     DAWN_BACKEND_NS = None
     DAWN_BACKEND_NAME = None
-    DAWN_BACKEND_OPTS = {
-        "add_profile_info": {"versioning": True},
-        "clean": {"versioning": False},
-        "debug_mode": {"versioning": True},
-        "dump_sir": {"versioning": False},
-        "verbose": {"versioning": False},
-    }
+    DAWN_BACKEND_OPTS = copy.deepcopy(_DAWN_BASE_OPTIONS)
 
     GT_BACKEND_T = None
 
@@ -307,11 +325,9 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
 
     @classmethod
     def generate_extension_sources(cls, stencil_id, definition_ir, options, gt_backend_t):
-        sir = convert_to_SIR(definition_ir)
+        sir = SIRConverter.apply(definition_ir)
         stencil_short_name = stencil_id.qualified_name.split(".")[-1]
-
         backend_opts = dict(**options.backend_opts)
-        backend_opts["backend"] = cls.DAWN_BACKEND_NAME
         dawn_namespace = cls.DAWN_BACKEND_NS
 
         dump_sir_opt = backend_opts.get("dump_sir", False)
@@ -337,7 +353,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
                 )
 
         # If present, parse backend string
-        dawn_backend = DAWN_CODEGEN_BACKENDS[backend_opts["backend"] or "GridTools"]
+        dawn_backend = DAWN_CODEGEN_BACKENDS[cls.DAWN_BACKEND_NAME or "GridTools"]
 
         dawn_opts = {
             key: value
@@ -552,32 +568,6 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
         **kwargs,
     ):
         pass
-
-
-_DAWN_BASE_OPTIONS = {
-    "add_profile_info": {"versioning": True},
-    "clean": {"versioning": False},
-    "debug_mode": {"versioning": True},
-    "dump_sir": {"versioning": False},
-    "verbose": {"versioning": False},
-}
-
-
-_DAWN_TOOLCHAIN_OPTIONS = {}
-for name in dir(dawn4py.CodeGenOptions) + dir(dawn4py.OptimizerOptions):
-    if (
-        name.startswith("print")
-        or name.startswith("dump")
-        or name.startswith("report")
-        or name.startswith("serialize")
-        or name.startswith("deserialize")
-    ):
-        _DAWN_TOOLCHAIN_OPTIONS[name] = {"versioning": False}
-    elif not name.startswith("_") and name != "backend":
-        _DAWN_TOOLCHAIN_OPTIONS[name] = {"versioning": True}
-
-
-_DAWN_BACKEND_OPTIONS = {**_DAWN_BASE_OPTIONS, **_DAWN_TOOLCHAIN_OPTIONS}
 
 
 @gt_backend.register

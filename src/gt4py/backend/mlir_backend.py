@@ -615,10 +615,10 @@ class MLIRBackend(gt_backend.BasePyExtBackend):
             "--cse",
         ]
 
-        is_cuda = "cuda" in mlir_backend
+        is_cuda = True #"cuda" in mlir_backend
         if is_cuda:
             optimizations.extend(
-                ["--stencil-loop-mapping='block-sizes=128,1,1'", "--convert-parallel-loops-to-gpu"]
+                ["--stencil-loop-mapping=block-sizes=128,1,1", "--convert-parallel-loops-to-gpu"]
             )
         optimizations.extend(["--lower-affine", "--convert-scf-to-std"])
 
@@ -630,17 +630,19 @@ class MLIRBackend(gt_backend.BasePyExtBackend):
             optimizations.extend(
                 ["--stencil-gpu-to-cubin", "--stencil-gpu-to-cuda", "--cse", "--canonicalize"]
             )
-        optimizations.extend(["--convert-std-to-llvm=emit-c-wrappers"])
+        else:
+            optimizations.extend(["--convert-std-to-llvm=emit-c-wrappers"])
 
         # Perform stencil optimizations and lower MLIR
         mlir_in = mlir.file_name
         mlir_out = os.path.splitext(mlir_in)[0] + "_lower.mlir"
         encoding = "utf-8"
+        gen_files = True # not os.path.exists(mlir_out)
 
         command = [tools.opt]
         command.extend(optimizations)
         command.extend([mlir_in])
-        if not os.path.exists(mlir_out):
+        if gen_files:
             output = sub.run(command, capture_output=True)
             if len(output.stderr) > 0:  # Check for error...
                 raise RuntimeError("OEC-ERROR: " + str(output.stderr, encoding))
@@ -650,7 +652,7 @@ class MLIRBackend(gt_backend.BasePyExtBackend):
         # Translate lowered MLIR to LLVM
         mlir_llvm = os.path.splitext(mlir_in)[0] + "_llvm.mlir"
         command = [tools.translate, "--mlir-to-llvmir", mlir_out]
-        if not os.path.exists(mlir_llvm):
+        if gen_files:
             output = sub.run(command, capture_output=True)
             if len(output.stderr) > 0:  # Check for error...
                 raise RuntimeError("MLIR-ERROR: " + str(output.stderr, encoding))
@@ -658,10 +660,10 @@ class MLIRBackend(gt_backend.BasePyExtBackend):
                 out.write(str(output.stdout, encoding))
 
         # Compile LLVM to assembly...
-        debug_mode = options.backend_opts.get("debug_mode", False),
+        debug_mode = options.backend_opts.get("debug_mode", False)
         opt_level = "-O" + str(0 if debug_mode else 3)
         llvm_asm = os.path.splitext(mlir_llvm)[0] + ".s"
-        if not os.path.exists(llvm_asm):
+        if gen_files:
             command = [tools.compile, opt_level, mlir_llvm, "-o", llvm_asm]
             output = sub.run(command, capture_output=True)
             if len(output.stderr) > 0:  # Check for error...
@@ -674,10 +676,17 @@ class MLIRBackend(gt_backend.BasePyExtBackend):
         # replace_template_config(size, height, bound_size, type, abs_path(
         #    benchmarks, kernel + ".cpp"), input2, num_measurements)
         binary = os.path.splitext(llvm_asm)[0] + ".o"
-        command = [tools.clang, "-c", opt_level]
+        command = [tools.clang, "-c", opt_level, llvm_asm, "-o", binary]
+        output = sub.run(command, capture_output=True)
+        if len(output.stderr) > 0:  # Check for error...
+            raise RuntimeError("CLANG-ERROR: " + str(output.stderr, encoding))
+
+        command = [tools.clang, opt_level, binary, tools.wrapper]
         if is_cuda:
+            if "CUDA_PATH" in os.environ:
+                cuda_path = os.environ["CUDA_PATH"]
+                command.extend([f"-I{cuda_path}/include -L{cuda_path}/lib"])
             command.extend(["-lcudart", "-lcuda"])
-        command.extend([llvm_asm, "-o", binary])
         output = sub.run(command, capture_output=True)
         if len(output.stderr) > 0:  # Check for error...
             raise RuntimeError("CLANG-ERROR: " + str(output.stderr, encoding))

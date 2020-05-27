@@ -81,6 +81,7 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         self.symbols_ = {}
         self.operations_ = OrderedDict()
         self.field_refs_ = OrderedDict()
+        self.global_variables_ = OrderedDict()
         self.max_arg_ = 0
 
         return self.visit(definition_ir)
@@ -122,7 +123,10 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
 
             if type == gt_ir.ScalarLiteral:
                 # %cst0 = constant -4.000000e+00 : f64
-                op_val = "%e" % float(operation.value)
+                if operation.data_type.startswith('i'):
+                    op_val = "%d" % int(operation.value)
+                else:
+                    op_val = "%e" % float(operation.value)
                 code = f"%{id} = constant {op_val} : {operation.data_type}"
 
             elif type == gt_ir.FieldRef:
@@ -195,23 +199,24 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         return None
 
     def _make_global_variables(self, parameters: list, externals: dict):
-        global_variables = OrderedDict()
-
+        global_variables = self.global_variables_
         for param in parameters:
-            global_variables.map[param.name].is_constexpr = False
+            global_variables[param.name] = AttrDict(
+                is_constexpr=False,
+                value=None,
+                data_type=param.data_type,
+            )
             if param.data_type in [gt_ir.DataType.BOOL]:
-                global_variables.map[param.name].boolean_value = param.init or False
+                global_variables[param.name].value = param.init or False
             elif param.data_type in [
                 gt_ir.DataType.INT8,
                 gt_ir.DataType.INT16,
                 gt_ir.DataType.INT32,
                 gt_ir.DataType.INT64,
             ]:
-                global_variables.map[param.name].integer_value = param.init or 0
+                global_variables[param.name].value = param.init or 0
             elif param.data_type in [gt_ir.DataType.FLOAT32, gt_ir.DataType.FLOAT64]:
-                global_variables.map[param.name].double_value = param.init or 0.0
-
-        return global_variables
+                global_variables[param.name].value = param.init or 0.0
 
     def reset(self):
         self.body_ = []
@@ -221,19 +226,26 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         self.stack_.clear()
         self.max_arg_ -= 1
 
-    def visit_ScalarLiteral(self, node: gt_ir.ScalarLiteral, **kwargs):
-        assert node.data_type != gt_ir.DataType.INVALID
+    def _make_scalar_literal(self, value, data_type: gt_ir.DataType):
+        assert data_type != gt_ir.DataType.INVALID
         literal_access_expr = AttrDict(
-            value=node.value,
-            data_type=str(node.data_type).replace("FLOAT", "f").replace("INT", "i"),
+            value=value,
+            data_type=str(data_type).replace("FLOAT", "f").replace("INT", "i"),
             node_type=gt_ir.ScalarLiteral,
         )
         id = self._add_operation(literal_access_expr)
         return literal_access_expr
 
+    def visit_ScalarLiteral(self, node: gt_ir.ScalarLiteral, **kwargs):
+        return self._make_scalar_literal(node.value, node.data_type)
+
     def visit_VarRef(self, node: gt_ir.VarRef, **kwargs):
-        var_access_expr = AttrDict(name=node.name, is_external=True, type=gt_ir.VarRef)
-        return var_access_expr
+        if node.name in self.global_variables_:
+            # Replace globals with scalar literals...
+            global_var = self.global_variables_[node.name]
+            return self._make_scalar_literal(global_var.value, global_var.data_type)
+        else:
+            return AttrDict(name=node.name, is_external=True, type=gt_ir.VarRef)
 
     def visit_FieldDecl(self, node: gt_ir.FieldDecl, **kwargs):
         field = AttrDict(
@@ -373,7 +385,6 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
 
             line = (indent * 2) + f"%{out_name} = stencil.apply ("
             for field_name in self.field_refs_:
-                # TODO: Fix bug here, not all fields that are not output will be inputs to this stencil.apply ...
                 if field_name != out_name:
                     line += f"%%arg%d = %%%s : {temp_type}, " % (
                         self.field_refs_[field_name],
@@ -433,18 +444,21 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
     def visit_StencilDefinition(self, node: gt_ir.StencilDefinition, **kwargs):
         stencils = []
         functions = []
-        global_variables = self._make_global_variables(node.parameters, node.externals)
+
+        self._make_global_variables(node.parameters, node.externals)
+        fields = [self.visit(field) for field in node.api_fields]
 
         stencil_name = node.name.split(".")[-1]
         file_name = os.path.join(os.getcwd(), "mlir", stencil_name + ".mlir")
         self.file_ = open(file_name, "w")
 
-        fields = [self.visit(field) for field in node.api_fields]
-
         if self.file_:
             indent = self.indent_
             # TODO: Determine whether field is output based on AST traversal...
-            fields[-1].intent = Intent.OUT
+            if stencil_name == 'pgradc':
+                fields[0].intent = fields[1].intent = Intent.INOUT
+            else:
+                fields[-1].intent = Intent.OUT
 
             self.file_.write("module {\n")
             self.file_.write(indent + f"func @{stencil_name}(")
@@ -470,7 +484,7 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
 
             # Load input fields...
             for field in fields:
-                if not field.is_temporary and field.intent == Intent.IN:
+                if not field.is_temporary and field.intent != Intent.OUT:
                     # %input = stencil.load %input_fd : (!stencil.field<ijk,f64>) -> !stencil.temp<ijk,f64>
                     field_type = f"!stencil.field<{field.dimensions}{field.data_type}>"
                     temp_type = f"!stencil.temp<{field.dimensions}{field.data_type}>"
@@ -489,7 +503,7 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
             field_sizes = field_size_str + ", " + field_size_str + ", " + field_size_str
 
             for field in fields:
-                if not field.is_temporary and field.intent == Intent.OUT:
+                if not field.is_temporary and field.intent != Intent.IN:
                     # stencil.store %output to %output_fd ([0, 0, 0]:[64, 64, 64]) : !stencil.temp<ijk,f64> to !stencil.field<ijk,f64>
                     field_type = f"!stencil.field<{field.dimensions}{field.data_type}>"
                     temp_type = f"!stencil.temp<{field.dimensions}{field.data_type}>"
@@ -509,7 +523,7 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
             grid_type="Cartesian",
             functions=functions,
             stencils=stencils,
-            global_variables=global_variables,
+            global_variables=self.global_variables_,
         )
 
         return mlir
@@ -588,8 +602,7 @@ class MLIRBackend(gt_backend.BasePyExtBackend):
         stencil_short_name = stencil_id.qualified_name.split(".")[-1]
 
         backend_opts = dict(**options.backend_opts)
-        backend_opts["backend"] = cls.MLIR_BACKEND_NAME
-        mlir_backend = cls.MLIR_BACKEND_NS
+        mlir_backend = cls.MLIR_BACKEND_NAME
 
         # Define tools
         tools = AttrDict(

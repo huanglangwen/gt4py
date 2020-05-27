@@ -291,6 +291,11 @@ class StencilObject(abc.ABC):
                 domain, origin, shapes, field_args, parameter_args, out_indices=out_indices
             )
 
+        # Scale fields...
+        domain = domain * 2
+        for field_arg in field_args:
+            field_args[field_arg] = field_args[field_arg].scale(2)
+
         self.run(
             _domain_=domain, _origin_=origin, exec_info=exec_info, **field_args, **parameter_args
         )

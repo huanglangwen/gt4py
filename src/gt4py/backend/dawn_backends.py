@@ -462,7 +462,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
             fields = {item.name: item for item in definition_ir.api_fields}
             parameters = {item.name: item for item in definition_ir.parameters}
 
-            halo_size = kwargs.pop("halo_size")
+            halo_size = kwargs.pop("halo_size") if "halo_size" in kwargs else 0
             boundary = gt_definitions.Boundary(
                 ([(halo_size, halo_size)] * len(domain_info.parallel_axes)) + [(0, 0)]
             )
@@ -520,11 +520,11 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
             gt_pyext_sources = cls.generate_extension_sources(
                 stencil_id, definition_ir, options, cls.GT_BACKEND_T
             )
-            module_kwargs["halo_size"] = int(
-                re.search(
-                    r"#define GRIDTOOLS_DAWN_HALO_EXTENT ([0-9]+)", gt_pyext_sources[dawn_src_file]
-                )[1]
-            )
+            # module_kwargs["halo_size"] = int(
+            #     re.search(
+            #         r"#define GRIDTOOLS_DAWN_HALO_EXTENT ([0-9]+)", gt_pyext_sources[dawn_src_file]
+            #     )[1]
+            # )
 
         else:
             # Pass NOTHING to the builder means try to reuse the source code files

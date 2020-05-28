@@ -342,7 +342,6 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
                 f.write(sir_utils.to_json(sir))
 
         # Get list of pass groups
-        pass_groups = dawn4py.default_pass_groups()
         if "no_opt" in backend_opts:
             pass_groups = []
         elif "opt_groups" in backend_opts:
@@ -351,6 +350,8 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
                 raise ValueError(
                     "Do not add 'default_opt' when opt 'opt_groups'. Instead, append dawn4py.default_pass_groups()"
                 )
+        else:
+            pass_groups = dawn4py.default_pass_groups()
 
         # If present, parse backend string
         dawn_backend = DAWN_CODEGEN_BACKENDS[cls.DAWN_BACKEND_NAME or "GridTools"]

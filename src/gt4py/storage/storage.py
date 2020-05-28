@@ -191,7 +191,7 @@ class Storage(np.ndarray):
             for i in range(len(flat_data) - int_factor):
                 avg = np.mean(flat_data[i:i+int_factor])
                 for k in range(int_factor):
-                    interp_data[i + k] = flat_data[i] + avg
+                    interp_data[i + k] = flat_data[i] + (float(k) * avg)
             new_data = interp_data.reshape(new_shape)
 
         res = from_array(

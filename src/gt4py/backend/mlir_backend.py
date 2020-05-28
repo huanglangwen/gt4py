@@ -698,8 +698,8 @@ class MLIRBackend(gt_backend.BasePyExtBackend):
 
         command = [tools.clang, opt_level, binary, tools.wrapper]
         if is_cuda:
-            if "CUDA_PATH" in os.environ:
-                cuda_path = os.environ["CUDA_PATH"]
+            if "CUDA_SRC" in os.environ:
+                cuda_path = os.environ["CUDA_SRC"]
                 command.extend([f"-I{cuda_path}/include -L{cuda_path}/lib"])
             command.extend(["-lcudart", "-lcuda"])
         output = sub.run(command, capture_output=True)

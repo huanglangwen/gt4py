@@ -2,7 +2,9 @@ import abc
 import sys
 import time
 import warnings
-
+import io
+import os
+import jinja2
 import numpy as np
 
 import gt4py.backend as gt_backend
@@ -47,11 +49,11 @@ class StencilObject(abc.ABC):
     def __str__(self):
         result = """
 <StencilObject: {name}> [backend="{backend}"]
-    - I/O fields: {fields}
-    - Parameters: {params}
-    - Constants: {constants}
+    - I/O fields: {fields} 
+    - Parameters: {params} 
+    - Constants: {constants} 
     - Definition ({func}):
-{source}
+{source} 
         """.format(
             name=self.options["module"] + "." + self.options["name"],
             version=self._gt_id_,
@@ -239,10 +241,14 @@ class StencilObject(abc.ABC):
         for name, field in used_arg_fields.items():
             origin.setdefault(name, origin["_all_"] if "_all_" in origin else field.default_origin)
 
+        # TODO: Set upper boundaries to zero for now to confirm this is the issue..
+        # upper_boundaries = {name: self.field_info[name].boundary.upper_indices for name in shapes.keys()}
+        upper_boundaries = {name: Shape([0] * self.domain_info.ndims) for name in shapes.keys()}
+
         # Domain
         max_domain = Shape([sys.maxsize] * self.domain_info.ndims)
         for name, shape in shapes.items():
-            upper_boundary = Index(self.field_info[name].boundary.upper_indices)
+            upper_boundary = Index(upper_boundaries[name])
             max_domain &= shape - (Index(origin[name]) + upper_boundary)
 
         if domain is None:
@@ -267,18 +273,132 @@ class StencilObject(abc.ABC):
                     f"Origin for field {name} too small. Must be at least {min_origin}, is {origin[name]}"
                 )
             min_shape = tuple(
-                o + d + h
-                for o, d, h in zip(
-                    origin[name], domain, self.field_info[name].boundary.upper_indices
-                )
+                o + d + h for o, d, h in zip(origin[name], domain, upper_boundaries[name])
             )
             if min_shape > field.shape:
                 raise ValueError(
                     f"Shape of field {name} is {field.shape} but must be at least {min_shape} for given domain and origin."
                 )
 
+        stencil_name = self.options["module"] + "." + self.options["name"]
+
+        debug_mode = "debug_mode" in self.options and self.options["debug_mode"]
+        if debug_mode:
+            out_indices = [
+                field_idx for field_idx, field_arg in enumerate(field_args) if "out" in field_arg
+            ]
+            out_fields = self._write_unit_test(
+                domain, origin, shapes, field_args, parameter_args, out_indices=out_indices
+            )
+
         self.run(
             _domain_=domain, _origin_=origin, exec_info=exec_info, **field_args, **parameter_args
         )
         if exec_info is not None:
             exec_info["call_run_end_time"] = time.perf_counter()
+
+        if debug_mode:
+            self._write_output_test_data(out_fields)
+
+    def _write_unit_test(
+        self,
+        domain: tuple,
+        origins: dict,
+        shapes: dict,
+        field_args: dict,
+        parameter_args: dict,
+        out_indices=[],
+    ):
+        components = self.__class__.__module__.split(".")[1:]
+        if "GT_CACHE_DIR_NAME" in os.environ:
+            unit_test_dir = os.environ["GT_CACHE_DIR_NAME"]
+        else:
+            unit_test_dir = os.path.join(os.getcwd(), ".gt_cache")
+
+        cpython_id = "py{major}{minor}_{api}".format(
+            major=sys.version_info.major, minor=sys.version_info.minor, api=sys.api_version
+        )
+        backend = self.backend.replace(":", "")
+
+        unit_test_name = "unit_test.cpp"
+        unit_test_dir = (
+            os.path.join(unit_test_dir, cpython_id, backend, os.sep.join(components))
+            + "_pyext_BUILD"
+        )
+
+        data_dir = os.path.join(unit_test_dir, "data")
+        os.makedirs(data_dir, exist_ok=True)
+
+        arg_fields = []
+        out_fields = []
+
+        if len(out_indices) < 1:
+            out_indices.append(0)
+
+        for field_idx, field_arg in enumerate(field_args):
+            field = field_args[field_arg]
+            str_io = io.StringIO()
+            np.savetxt(str_io, field.data.flatten())
+
+            data_path = os.path.join(data_dir, f"{field_arg}.csv")
+            data_file = open(data_path, "w")
+            data_file.write(str_io.getvalue().rstrip().replace("\n", ","))
+
+            arg_fields.append(
+                dict(
+                    name=field_arg,
+                    dtype=str(field.dtype),
+                    origin=origins[field_arg],
+                    shape=shapes[field_arg],
+                    stride=field.strides,
+                    size=field.size,
+                )
+            )
+
+            if field_idx in out_indices:
+                out_fields.append(dict(name=field_arg, dtype=str(field.dtype), size=field.size))
+
+        parameters = []
+        for param_arg in parameter_args:
+            param = parameter_args[param_arg]
+            parameters.append(dict(name=param_arg, dtype=type(param).__name__, value=str(param)))
+
+        template_args = dict(
+            arg_fields=arg_fields,
+            domain=tuple(domain),
+            parameters=parameters,
+            out_fields=out_fields,
+            stencil_short_name=self.options["name"],
+            stencil_unique_name=self.__class__.__name__,
+            test_path=unit_test_dir,
+            backend=self.backend,
+        )
+
+        template_dir = gt_backend.GTPyExtGenerator.TEMPLATE_DIR
+        template_file = open(os.path.join(template_dir, f"{unit_test_name}.in"), "r")
+        template = jinja2.Template(template_file.read())
+        unit_test_source = template.render(**template_args)
+
+        unit_test_path = os.path.join(unit_test_dir, unit_test_name)
+        unit_test_file = open(unit_test_path, "w")
+        unit_test_file.write(unit_test_source)
+
+        # 2nd pass: get paths and references to output field data...
+        out_idx = 0
+        for field_idx, field_arg in enumerate(field_args):
+            if field_idx in out_indices:
+                out_fields[out_idx]["data"] = field_args[field_arg]
+                out_fields[out_idx]["path"] = os.path.join(
+                    data_dir, out_fields[out_idx]["name"] + "_out.csv"
+                )
+                out_idx += 1
+
+        return out_fields
+
+    def _write_output_test_data(self, out_fields: list, overwrite=False):
+        for out_field in out_fields:
+            if overwrite or not os.path.exists(out_field["path"]):
+                str_io = io.StringIO()
+                np.savetxt(str_io, out_field["data"].data.flatten())
+                data_file = open(out_field["path"], "w")
+                data_file.write(str_io.getvalue().rstrip().replace("\n", ","))

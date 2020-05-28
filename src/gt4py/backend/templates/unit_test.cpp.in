@@ -41,12 +41,8 @@
 
 namespace {{ stencil_unique_name }}_pyext {
 
-typedef float float32;
-typedef double float64;
-
 const float32 float32_precision = 1e-6;
 const float64 float64_precision = 1e-10;
-
 const std::string test_path = "{{ test_path }}/";
 
 template <typename T>

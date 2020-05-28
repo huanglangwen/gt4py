@@ -188,10 +188,10 @@ class Storage(np.ndarray):
             interp_data = np.zeros(new_size, dtype=self.dtype)
 
             # Interpolate...
-            for i in range(len(flat_data) - int_factor):
-                avg = np.mean(flat_data[i:i+int_factor])
+            for i in range(len(flat_data) - 1):
+                diff = flat_data[i + 1] - flat_data[i]
                 for k in range(int_factor):
-                    interp_data[i + k] = flat_data[i] + (float(k) * avg)
+                    interp_data[i + k] = flat_data[i] + (float(k) * diff)
             new_data = interp_data.reshape(new_shape)
 
         res = from_array(

@@ -138,6 +138,15 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
                 temp_type = f"!stencil.temp<{field.dimensions}{field.data_type}>"
                 code = f"%{id} = stencil.access %{arg_name}[{offset}] : ({temp_type}) -> {operation.data_type}"
 
+            elif type == gt_ir.UnaryOpExpr:
+                operator = operation.op
+                if operator == "-":
+                    op_name = "neg"
+                else:
+                    raise NotImplementedError(f"Unimplemented unary operator '{operator}'")
+                op_name += operation.data_type[0]
+                code = f"%{id} = {op_name} %{operation.operand} : {operation.data_type}"
+
             elif type == gt_ir.BinOpExpr:
                 # Use type of LHS for now...
                 lhs = self.operations_[operation.lhs]
@@ -186,7 +195,6 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
             else:  # Expr
                 raise NotImplementedError("Unimplemented node type '%s'" % str(type))
 
-            # operation["code"] = code
             self.body_.append(code)
             print(code)
 
@@ -277,14 +285,34 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
     def visit_UnaryOpExpr(self, node: gt_ir.UnaryOpExpr, **kwargs):
         op = node.op.python_symbol
         operand = self.visit(node.arg)
-        return sir_utils.make_unary_operator(op, operand)
+        if op == "+":
+            rhs = self.stack_[-1]
+            return self.operations_[rhs]     # Do nothing for plus operator (leave operand untouched on the stack)
+        else:
+            # Pop operand off the stack...
+            rhs = self.stack_.pop()
+            print("pop(%s)" % rhs)
+            self._emit_operation(rhs)
+            data_type = self.operations_[rhs].data_type
+
+            unary_op_expr = AttrDict(
+                operand=rhs, op=op, data_type=data_type, node_type=gt_ir.UnaryOpExpr
+            )
+            id = self._add_operation(unary_op_expr)
+
+            return unary_op_expr
 
     def visit_BinOpExpr(self, node: gt_ir.BinOpExpr, **kwargs):
-        left = self.visit(node.lhs)
-        right = self.visit(node.rhs)
         op = node.op.python_symbol
         if op == "**":
-            return self.visit_ExpOpExpr(left, right)
+            if node.rhs.value == 2:
+                op = "*"
+                node.rhs = node.lhs
+            else:
+                raise NotImplementedError(f"Unsupported exponent value '{right.value}'")
+
+        left = self.visit(node.lhs)
+        right = self.visit(node.rhs)
 
         # Pop two items off the stack...
         rhs = self.stack_.pop()
@@ -294,22 +322,14 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         lhs = self.stack_.pop()
         print("pop(%s)" % lhs)
         self._emit_operation(lhs)
-        data_type = self.operations_[lhs]["data_type"]
+        data_type = self.operations_[lhs].data_type
 
         bin_op_expr = AttrDict(
             lhs=lhs, rhs=rhs, op=op, data_type=data_type, node_type=gt_ir.BinOpExpr
         )
-
         id = self._add_operation(bin_op_expr)
 
         return bin_op_expr
-
-    def visit_ExpOpExpr(self, left, right):
-        exponent = right.value
-        if exponent == "2":
-            return sir_utils.make_binary_operator(left, "*", left)
-        # Currently only support squares so raise error...
-        raise RuntimeError("Unsupport exponential value: '%s'." % exponent)
 
     def visit_TernaryOpExpr(self, node: gt_ir.TernaryOpExpr, **kwargs):
         cond = self.visit(node.condition)

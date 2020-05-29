@@ -394,23 +394,15 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
                 assert False, "Wrong data_type for parameter"
             parameters.append({"name": parameter.name, "dtype": dtype})
 
-        # TODO: Compute these from extents...
-        stencil_halos = dict(p_grad_c_ustencil=[1, 0, 0], p_grad_c_vstencil=[0, 1, 0])
-        if stencil_short_name in stencil_halos:
-            halos = stencil_halos[stencil_short_name]
-        else:
-            halos = [0, 0, 0]
-
         template_args = dict(
             arg_fields=arg_fields,
-            dawn_namespace=dawn_namespace,
+            dawn_backend=dawn_namespace,
             gt_backend=gt_backend_t,
             header_file=header_file,
             module_name=module_name,
             parameters=parameters,
             stencil_short_name=stencil_short_name,
             stencil_unique_name=stencil_unique_name,
-            halos=halos,
         )
 
         for key, file_name in cls.TEMPLATE_FILES.items():
@@ -435,7 +427,6 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
             # Dawn backends do not use the internal analysis pipeline, so a custom
             # wrapper_info object should be passed to the module generator
             assert "implementation_ir" in kwargs
-
             info = {}
             if definition_ir.sources is not None:
                 info["sources"].update(
@@ -462,9 +453,8 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
             fields = {item.name: item for item in definition_ir.api_fields}
             parameters = {item.name: item for item in definition_ir.parameters}
 
-            halo_size = kwargs.pop("halo_size") if "halo_size" in kwargs else 0
             boundary = gt_definitions.Boundary(
-                ([(halo_size, halo_size)] * len(domain_info.parallel_axes)) + [(0, 0)]
+                ([(0, 0)] * len(domain_info.parallel_axes)) + [(0, 0)]
             )
 
             for arg in definition_ir.api_signature:

@@ -487,7 +487,7 @@ class BaseModuleGenerator(abc.ABC):
             module_members=module_members,
             class_name=self.stencil_class_name,
             class_members=class_members,
-            docstring=wrapper_info["docstring"],
+            docstring=(wrapper_info["docstring"] if "docstring" in wrapper_info else ""),
             gt_backend=self.backend_name,
             gt_source=wrapper_info["sources"],
             gt_domain_info=wrapper_info["domain_info"],

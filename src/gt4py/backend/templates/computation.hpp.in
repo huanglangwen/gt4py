@@ -19,11 +19,16 @@
     - arg_fields: [{ "name": str, "dtype": str, "layout_id": int }]
     - parameters: [{ "name": str, "dtype": str }]
     - stencil_unique_name: str
+    - use_gtmock: bool
 #}
 
-
+{% if use_gtmock %}
+#include <gtmock/common/defs.hpp>
+#include <gtmock/common/gt_math.hpp>
+{% else %}
 #include <gridtools/common/defs.hpp>
 #include <gridtools/common/gt_math.hpp>
+{% endif %}
 
 #include <array>
 #include <cstdint>

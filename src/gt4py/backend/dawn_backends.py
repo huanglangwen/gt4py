@@ -361,13 +361,18 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
             for key, value in backend_opts.items()
             if key in _DAWN_TOOLCHAIN_OPTIONS.keys()
         }
+
+        use_gtmock = "value" in cls.options["use_gtmock"] and cls.options["use_gtmock"]["value"]
+
         source = dawn4py.compile(
             sir,
             groups=pass_groups,
             backend=dawn_backend,
             run_with_sync=("CUDA" not in str(dawn_backend)),
+            use_gtmock=use_gtmock,
             **dawn_opts,
         )
+
         stencil_unique_name = cls.get_pyext_class_name(stencil_id)
         module_name = cls.get_pyext_module_name(stencil_id)
         pyext_sources = {f"_dawn_{stencil_short_name}.hpp": source}
@@ -403,6 +408,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
             parameters=parameters,
             stencil_short_name=stencil_short_name,
             stencil_unique_name=stencil_unique_name,
+            use_gtmock=use_gtmock,
         )
 
         for key, file_name in cls.TEMPLATE_FILES.items():
@@ -643,7 +649,8 @@ class DawnOptBackend(BaseDawnBackend):
     GT_BACKEND_T = "x86"
 
     name = "dawn:cxxopt"
-    options = _DAWN_BACKEND_OPTIONS
+    options = copy.deepcopy(_DAWN_BACKEND_OPTIONS)
+    options["use_gtmock"]["value"] = True
     storage_info = gt_backend.GTX86Backend.storage_info
 
     @classmethod
@@ -662,7 +669,8 @@ class DawnCUDABackend(BaseDawnBackend):
     MODULE_GENERATOR_CLASS = gt_backend.CUDAPyExtModuleGenerator
 
     name = "dawn:cuda"
-    options = _DAWN_BACKEND_OPTIONS
+    options = copy.deepcopy(_DAWN_BACKEND_OPTIONS)
+    #options["use_gtmock"]["value"] = True
     storage_info = copy.deepcopy(gt_backend.GTX86Backend.storage_info)
     storage_info["device"] = "gpu"
 

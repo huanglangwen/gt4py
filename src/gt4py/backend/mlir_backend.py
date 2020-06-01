@@ -237,8 +237,8 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
     def _make_scalar_literal(self, value, data_type: gt_ir.DataType):
         assert data_type != gt_ir.DataType.INVALID
         literal_access_expr = AttrDict(
-            value=value,
-            data_type=str(data_type).replace("FLOAT", "f").replace("INT", "i"),
+            value=float(value),
+            data_type="f64", #str(data_type).replace("FLOAT", "f").replace("INT", "i"),
             node_type=gt_ir.ScalarLiteral,
         )
         id = self._add_operation(literal_access_expr)
@@ -872,12 +872,6 @@ class MLIRBackend(gt_backend.BasePyExtBackend):
             gt_pyext_sources = cls.generate_extension_sources(
                 stencil_id, definition_ir, options, cls.GT_BACKEND_T
             )
-            module_kwargs["halo_size"] = int(
-                re.search(
-                    r"#define GRIDTOOLS_DAWN_HALO_EXTENT ([0-9]+)", gt_pyext_sources[dawn_src_file]
-                )[1]
-            )
-
         else:
             # Pass NOTHING to the builder means try to reuse the source code files
             gt_pyext_sources = {key: gt_utils.NOTHING for key in cls.TEMPLATE_FILES.keys()}

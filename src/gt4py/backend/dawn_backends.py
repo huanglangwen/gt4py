@@ -365,7 +365,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
             sir,
             groups=pass_groups,
             backend=dawn_backend,
-            run_with_sync=("CUDA" not in str(dawn_backend)),
+            run_with_sync=False,
             **dawn_opts,
         )
         stencil_unique_name = cls.get_pyext_class_name(stencil_id)
@@ -510,12 +510,6 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
             gt_pyext_sources = cls.generate_extension_sources(
                 stencil_id, definition_ir, options, cls.GT_BACKEND_T
             )
-            module_kwargs["halo_size"] = int(
-                re.search(
-                    r"#define GRIDTOOLS_DAWN_HALO_EXTENT ([0-9]+)", gt_pyext_sources[dawn_src_file]
-                )[1]
-            )
-
         else:
             # Pass NOTHING to the builder means try to reuse the source code files
             gt_pyext_sources = {key: gt_utils.NOTHING for key in cls.TEMPLATE_FILES.keys()}

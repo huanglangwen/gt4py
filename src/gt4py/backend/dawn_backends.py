@@ -368,7 +368,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
             sir,
             groups=pass_groups,
             backend=dawn_backend,
-            run_with_sync=("CUDA" not in str(dawn_backend)),
+            run_with_sync=False ,
             use_gtmock=use_gtmock,
             **dawn_opts,
         )
@@ -650,7 +650,7 @@ class DawnOptBackend(BaseDawnBackend):
 
     name = "dawn:cxxopt"
     options = copy.deepcopy(_DAWN_BACKEND_OPTIONS)
-    options["use_gtmock"]["value"] = True
+    # options["use_gtmock"]["value"] = True
     storage_info = gt_backend.GTX86Backend.storage_info
 
     @classmethod
@@ -669,8 +669,7 @@ class DawnCUDABackend(BaseDawnBackend):
     MODULE_GENERATOR_CLASS = gt_backend.CUDAPyExtModuleGenerator
 
     name = "dawn:cuda"
-    options = copy.deepcopy(_DAWN_BACKEND_OPTIONS)
-    #options["use_gtmock"]["value"] = True
+    options = _DAWN_BACKEND_OPTIONS
     storage_info = copy.deepcopy(gt_backend.GTX86Backend.storage_info)
     storage_info["device"] = "gpu"
 

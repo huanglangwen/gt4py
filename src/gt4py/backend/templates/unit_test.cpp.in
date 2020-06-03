@@ -36,6 +36,7 @@
 
 {%- if "cuda" in backend %}
 #include <cuda.h>
+#include <cuda_runtime.h>
 {%- endif %}
 #include <gtest/gtest.h>
 
@@ -46,7 +47,6 @@ typedef double float64;
 
 const float32 float32_precision = 1e-6;
 const float64 float64_precision = 1e-10;
-
 const std::string test_path = "{{ test_path }}/";
 
 template <typename T>
@@ -111,7 +111,7 @@ TEST(TestGT4Py, {{ stencil_short_name }}) {
 {% for field in arg_fields -%}
   {{ field.dtype }}* d_{{ field.name }};
   cudaMalloc((void**) &d_{{ field.name }}, {{ field.size }} * sizeof({{ field.dtype }}));
-  cudaMemcpy({{ field.name }}->data(), d_{{ field.name }}, {{ field.size }} * sizeof({{ field.dtype }}), cudaMemcpyHostToDevice);
+  cudaMemcpy(d_{{ field.name }}, {{ field.name }}->data(), {{ field.size }} * sizeof({{ field.dtype }}), cudaMemcpyHostToDevice);
 {% endfor -%}
 {%- endif %}
 
@@ -151,7 +151,7 @@ TEST(TestGT4Py, {{ stencil_short_name }}) {
 
 {%- if "cuda" in backend %}
 {% for field in out_fields -%}
-cudaMemcpy(d_{{ field.name }}, {{ field.name }}->data(), {{ field.size }} * sizeof({{ field.dtype }}), cudaMemcpyDeviceToHost);
+cudaMemcpy({{ field.name }}->data(), d_{{ field.name }}, {{ field.size }} * sizeof({{ field.dtype }}), cudaMemcpyDeviceToHost);
 {% endfor -%}
 
 {% for field in arg_fields -%}

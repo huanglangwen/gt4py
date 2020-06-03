@@ -609,7 +609,7 @@ class DawnGTCUDABackend(BaseDawnBackend):
     DAWN_BACKEND_NS = "gt"
     DAWN_BACKEND_NAME = "GridTools"
     GT_BACKEND_T = "cuda"
-    MODULE_GENERATOR_CLASS = gt_backend.CUDAPyExtModuleGenerator
+    MODULE_GENERATOR_CLASS = gt_backend.GTCUDAPyModuleGenerator
 
     name = "dawn:gtcuda"
     options = _DAWN_BACKEND_OPTIONS

@@ -597,12 +597,11 @@ class DawnGTCUDABackend(BaseDawnBackend):
     DAWN_BACKEND_NS = "gt"
     DAWN_BACKEND_NAME = "GridTools"
     GT_BACKEND_T = "cuda"
-    MODULE_GENERATOR_CLASS = gt_backend.CUDAPyExtModuleGenerator
+    MODULE_GENERATOR_CLASS = gt_backend.GTCUDAPyModuleGenerator
 
     name = "dawn:gtcuda"
     options = _DAWN_BACKEND_OPTIONS
-    storage_info = copy.deepcopy(gt_backend.GTX86Backend.storage_info)
-    storage_info["device"] = "gpu"
+    storage_info = gt_backend.GTCUDABackend.storage_info
 
     @classmethod
     def generate_extension(cls, stencil_id, definition_ir, options, **kwargs):
@@ -657,8 +656,7 @@ class DawnCUDABackend(BaseDawnBackend):
 
     name = "dawn:cuda"
     options = _DAWN_BACKEND_OPTIONS
-    storage_info = copy.deepcopy(gt_backend.GTX86Backend.storage_info)
-    storage_info["device"] = "gpu"
+    storage_info = gt_backend.GTCUDABackend.storage_info
 
     @classmethod
     def generate_extension(cls, stencil_id, definition_ir, options, **kwargs):

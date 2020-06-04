@@ -76,6 +76,7 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
 
         self.stack_ = deque()
         self.body_ = []
+        self.constants_ = {}
         self.op_counts_ = {}
         self.out_counts_ = {}
         self.symbols_ = {}
@@ -90,6 +91,8 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         key = str(operation)
         if key in self.symbols_:
             id = self.symbols_[key]
+        elif operation.node_type == gt_ir.ScalarLiteral and operation.value in self.constants_:
+            id = self.constants_[operation.value]
         else:
             type = operation.node_type
             prefix = "exp"
@@ -177,9 +180,13 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
                 elif operator == "==":
                     op_name = "cmp"
                     comp = "eq"
+                    if data_type[0] == 'f':
+                        comp = "o" + comp
                 elif operator == "!=":
                     op_name = "cmp"
                     comp = "ne"
+                    if data_type[0] == 'f':
+                        comp = "o" + comp
                 else:
                     raise NotImplementedError(f"Unimplemented binary operator '{op_name}'")
 
@@ -231,17 +238,23 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         self.op_counts_ = {}
         self.symbols_ = {}
         self.field_refs_.clear()
+        self.constants_.clear()
         self.stack_.clear()
         self.max_arg_ -= 1
 
     def _make_scalar_literal(self, value, data_type: gt_ir.DataType):
         assert data_type != gt_ir.DataType.INVALID
-        literal_access_expr = AttrDict(
-            value=float(value),
-            data_type="f64", #str(data_type).replace("FLOAT", "f").replace("INT", "i"),
-            node_type=gt_ir.ScalarLiteral,
-        )
+        if value not in self.constants_:
+            literal_access_expr = AttrDict(
+                value=float(value),
+                data_type="f64", #str(data_type).replace("FLOAT", "f").replace("INT", "i"),
+                node_type=gt_ir.ScalarLiteral,
+            )
+        else:
+            id = self.constants_[value]
+            literal_access_expr = self.operations_[id]
         id = self._add_operation(literal_access_expr)
+        self.constants_[value] = id
         return literal_access_expr
 
     def visit_ScalarLiteral(self, node: gt_ir.ScalarLiteral, **kwargs):
@@ -332,7 +345,13 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         return bin_op_expr
 
     def visit_TernaryOpExpr(self, node: gt_ir.TernaryOpExpr, **kwargs):
-        cond = self.visit(node.condition)
+        if not isinstance(node.condition,  gt_ir.BinOpExpr):
+            zero = gt_ir.ScalarLiteral(value=0.0, data_type=gt_ir.DataType.INT64)
+            bin_op = gt_ir.BinOpExpr(op=gt_ir.BinaryOperator.NE, lhs=node.condition, rhs=zero)
+            cond = self.visit(bin_op)
+        else:
+            cond = self.visit(node.condition)
+
         left = self.visit(node.then_expr)
         right = self.visit(node.else_expr)
 

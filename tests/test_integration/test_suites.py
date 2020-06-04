@@ -211,6 +211,7 @@ class TestHorizontalDiffusion(gt_testing.StencilTestSuite):
 
 @gtscript.function
 def lap_op(u):
+    """Laplacian operator."""
     return 4.0 * u[0, 0, 0] - (u[1, 0, 0] + u[-1, 0, 0] + u[0, 1, 0] + u[0, -1, 0])
 
 
@@ -218,6 +219,12 @@ def lap_op(u):
 def fwd_diff_op_xy(field):
     dx = field[1, 0, 0] - field[0, 0, 0]
     dy = field[0, 1, 0] - field[0, 0, 0]
+    return dx, dy
+
+
+@gtscript.function
+def wrap1arg2return(field):
+    dx, dy = fwd_diff_op_xy(field=field)
     return dx, dy
 
 
@@ -241,7 +248,7 @@ class TestHorizontalDiffusionSubroutines(gt_testing.StencilTestSuite):
     domain_range = [(1, 15), (1, 15), (1, 15)]
     backends = CPU_BACKENDS
     symbols = dict(
-        fwd_diff=gt_testing.global_name(singleton=fwd_diff_op_xy),
+        fwd_diff=gt_testing.global_name(singleton=wrap1arg2return),
         u=gt_testing.field(in_range=(-10, 10), boundary=[(2, 2), (2, 2), (0, 0)]),
         diffusion=gt_testing.field(in_range=(-10, 10), boundary=[(0, 0), (0, 0), (0, 0)]),
         weight=gt_testing.parameter(in_range=(0, 0.5)),
@@ -336,6 +343,15 @@ class TestHorizontalDiffusionSubroutines3(gt_testing.StencilTestSuite):
     )
 
     def definition(u, diffusion, *, weight):
+        """
+        Horizontal diffusion stencil.
+
+        Parameters
+        ----------
+        u : 3D float field, input
+        diffusion : 3D float field, output
+        weight : diffusion coefficient
+        """
         from __externals__ import fwd_diff, BRANCH
 
         with computation(PARALLEL), interval(...):
@@ -411,10 +427,37 @@ class TestRuntimeIfNested(gt_testing.StencilTestSuite):
         outfield[...] = 2
 
 
+@gtscript.function
+def add_one(field_in):
+    """Add 1 to each element of `field_in`."""
+    return field_in + 1
+
+
+class Test3FoldNestedIf(gt_testing.StencilTestSuite):
+
+    dtypes = (np.float_,)
+    domain_range = [(3, 3), (3, 3), (3, 3)]
+    backends = ["debug", "numpy", "gtx86"]
+    symbols = dict(field_a=gt_testing.field(in_range=(-1, 1), boundary=[(0, 0), (0, 0), (0, 0)]))
+
+    def definition(field_a):
+        with computation(PARALLEL), interval(...):
+            if field_a >= 0.0:
+                field_a = 0.0
+                if field_a > 1:
+                    field_a = 1
+                    if field_a > 2:
+                        field_a = 2
+
+    def validation(field_a, domain, origin):
+        for v in range(3):
+            field_a[np.where(field_a > v)] = v
+
+
 class TestRuntimeIfNestedDataDependent(gt_testing.StencilTestSuite):
 
     dtypes = (np.float_,)
-    domain_range = [(1, 15), (1, 15), (1, 15)]
+    domain_range = [(3, 3), (3, 3), (3, 3)]
     backends = CPU_BACKENDS
     symbols = dict(
         # factor=gt_testing.global_name(one_of=(-1., 0., 1.)),
@@ -438,12 +481,15 @@ class TestRuntimeIfNestedDataDependent(gt_testing.StencilTestSuite):
                 else:
                     field_c = field_a
 
+            field_a = add_one(field_a)
+
     def validation(field_a, field_b, field_c, *, factor, domain, origin, **kwargs):
 
         if factor > 0:
             field_b[...] = np.abs(field_a)
         else:
             field_c[...] = np.abs(field_a)
+        field_a += 1
 
 
 class TestTernaryOp(gt_testing.StencilTestSuite):

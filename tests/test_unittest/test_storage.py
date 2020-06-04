@@ -628,14 +628,17 @@ def test_transpose(backend="gtmc"):
 
 
 @pytest.mark.parametrize(
-    "backend",
-    [
-        name
-        for name in gt_backend.REGISTRY.names
-        if gt_backend.from_name(name).storage_info["device"] == "cpu"
-    ],
+    ["backend", "method"],
+    itertools.product(
+        [
+            name
+            for name in gt_backend.REGISTRY.names
+            if gt_backend.from_name(name).storage_info["device"] == "cpu"
+        ],
+        ["deepcopy", "copy_method"],
+    ),
 )
-def test_deepcopy_cpu(backend):
+def test_copy_cpu(method, backend):
     default_origin = (1, 1, 1)
     shape = (10, 10, 10)
     stor = gt_store.from_array(
@@ -644,7 +647,12 @@ def test_deepcopy_cpu(backend):
 
     import copy
 
-    stor_copy = copy.deepcopy(stor)
+    if method == "deepcopy":
+        stor_copy = copy.deepcopy(stor)
+    elif method == "copy_method":
+        stor_copy = stor.copy()
+    else:
+        raise ValueError(f"Test not implemented for copying using '{method}'")
 
     assert stor is not stor_copy
     assert stor._raw_buffer.ctypes.data != stor_copy._raw_buffer.ctypes.data
@@ -662,7 +670,8 @@ def test_deepcopy_cpu(backend):
 
 
 @pytest.mark.requires_gpu
-def test_deepcopy_gpu(backend="gtcuda"):
+@pytest.mark.parametrize("method", ["deepcopy", "copy_method"])
+def test_copy_gpu(method, backend="gtcuda"):
     default_origin = (1, 1, 1)
     shape = (10, 10, 10)
     stor = gt_store.from_array(
@@ -674,7 +683,13 @@ def test_deepcopy_gpu(backend="gtcuda"):
 
     import copy
 
-    stor_copy = copy.deepcopy(stor)
+    if method == "deepcopy":
+        stor_copy = copy.deepcopy(stor)
+    elif method == "copy_method":
+        stor_copy = stor.copy()
+    else:
+        raise ValueError(f"Test not implemented for copying using '{method}'")
+
     assert stor is not stor_copy
     assert stor._raw_buffer.data.ptr != stor_copy._raw_buffer.data.ptr
     if stor._raw_buffer.data.ptr < stor_copy._raw_buffer.data.ptr:
@@ -685,7 +700,8 @@ def test_deepcopy_gpu(backend="gtcuda"):
 
 
 @pytest.mark.requires_gpu
-def test_deepcopy_gpu_unmanaged(backend="gtcuda"):
+@pytest.mark.parametrize("method", ["deepcopy", "copy_method"])
+def test_deepcopy_gpu_unmanaged(method, backend="gtcuda"):
     default_origin = (1, 1, 1)
     shape = (10, 10, 10)
     stor = gt_store.from_array(
@@ -697,7 +713,12 @@ def test_deepcopy_gpu_unmanaged(backend="gtcuda"):
 
     import copy
 
-    stor_copy = copy.deepcopy(stor)
+    if method == "deepcopy":
+        stor_copy = copy.deepcopy(stor)
+    elif method == "copy_method":
+        stor_copy = stor.copy()
+    else:
+        raise ValueError(f"Test not implemented for copying using '{method}'")
 
     assert stor is not stor_copy
     assert stor._sync_state is not stor_copy._sync_state

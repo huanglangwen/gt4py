@@ -361,18 +361,13 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
             for key, value in backend_opts.items()
             if key in _DAWN_TOOLCHAIN_OPTIONS.keys()
         }
-
-        use_gtmock = "value" in cls.options["use_gtmock"] and cls.options["use_gtmock"]["value"]
-
         source = dawn4py.compile(
             sir,
             groups=pass_groups,
             backend=dawn_backend,
-            run_with_sync=False ,
-            use_gtmock=use_gtmock,
+            run_with_sync=False,
             **dawn_opts,
         )
-
         stencil_unique_name = cls.get_pyext_class_name(stencil_id)
         module_name = cls.get_pyext_module_name(stencil_id)
         pyext_sources = {f"_dawn_{stencil_short_name}.hpp": source}
@@ -408,7 +403,6 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
             parameters=parameters,
             stencil_short_name=stencil_short_name,
             stencil_unique_name=stencil_unique_name,
-            use_gtmock=use_gtmock,
         )
 
         for key, file_name in cls.TEMPLATE_FILES.items():
@@ -516,12 +510,6 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
             gt_pyext_sources = cls.generate_extension_sources(
                 stencil_id, definition_ir, options, cls.GT_BACKEND_T
             )
-            # module_kwargs["halo_size"] = int(
-            #     re.search(
-            #         r"#define GRIDTOOLS_DAWN_HALO_EXTENT ([0-9]+)", gt_pyext_sources[dawn_src_file]
-            #     )[1]
-            # )
-
         else:
             # Pass NOTHING to the builder means try to reuse the source code files
             gt_pyext_sources = {key: gt_utils.NOTHING for key in cls.TEMPLATE_FILES.keys()}
@@ -609,12 +597,11 @@ class DawnGTCUDABackend(BaseDawnBackend):
     DAWN_BACKEND_NS = "gt"
     DAWN_BACKEND_NAME = "GridTools"
     GT_BACKEND_T = "cuda"
-    MODULE_GENERATOR_CLASS = gt_backend.CUDAPyExtModuleGenerator
+    MODULE_GENERATOR_CLASS = gt_backend.GTCUDAPyModuleGenerator
 
     name = "dawn:gtcuda"
     options = _DAWN_BACKEND_OPTIONS
-    storage_info = copy.deepcopy(gt_backend.GTX86Backend.storage_info)
-    storage_info["device"] = "gpu"
+    storage_info = gt_backend.GTCUDABackend.storage_info
 
     @classmethod
     def generate_extension(cls, stencil_id, definition_ir, options, **kwargs):
@@ -649,8 +636,7 @@ class DawnOptBackend(BaseDawnBackend):
     GT_BACKEND_T = "x86"
 
     name = "dawn:cxxopt"
-    options = copy.deepcopy(_DAWN_BACKEND_OPTIONS)
-    # options["use_gtmock"]["value"] = True
+    options = _DAWN_BACKEND_OPTIONS
     storage_info = gt_backend.GTX86Backend.storage_info
 
     @classmethod
@@ -670,8 +656,7 @@ class DawnCUDABackend(BaseDawnBackend):
 
     name = "dawn:cuda"
     options = _DAWN_BACKEND_OPTIONS
-    storage_info = copy.deepcopy(gt_backend.GTX86Backend.storage_info)
-    storage_info["device"] = "gpu"
+    storage_info = gt_backend.GTCUDABackend.storage_info
 
     @classmethod
     def generate_extension(cls, stencil_id, definition_ir, options, **kwargs):

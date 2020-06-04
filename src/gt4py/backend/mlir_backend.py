@@ -317,12 +317,12 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         # Pop two items off the stack...
         rhs = self.stack_.pop()
         print("pop(%s)" % rhs)
-        self._emit_operation(rhs)
-
         lhs = self.stack_.pop()
         print("pop(%s)" % lhs)
-        self._emit_operation(lhs)
+
         data_type = self.operations_[lhs].data_type
+        self._emit_operation(lhs)
+        self._emit_operation(rhs)
 
         bin_op_expr = AttrDict(
             lhs=lhs, rhs=rhs, op=op, data_type=data_type, node_type=gt_ir.BinOpExpr
@@ -339,14 +339,13 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         # Pop three items off the stack...
         rhs = self.stack_.pop()
         print("pop(%s)" % rhs)
-        self._emit_operation(rhs)
-
         lhs = self.stack_.pop()
         print("pop(%s)" % lhs)
-        self._emit_operation(lhs)
-
         cexp = self.stack_.pop()
         print("pop(%s)" % cexp)
+
+        self._emit_operation(lhs)
+        self._emit_operation(rhs)
         self._emit_operation(cexp)
 
         ternary_op_expr = AttrDict(

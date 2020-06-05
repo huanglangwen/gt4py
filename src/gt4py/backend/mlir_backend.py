@@ -126,7 +126,7 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
 
             if type == gt_ir.ScalarLiteral:
                 # %cst0 = constant -4.000000e+00 : f64
-                if operation.data_type.startswith('i'):
+                if operation.data_type.startswith("i"):
                     op_val = "%d" % int(operation.value)
                 else:
                     op_val = "%e" % float(operation.value)
@@ -180,12 +180,12 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
                 elif operator == "==":
                     op_name = "cmp"
                     comp = "eq"
-                    if data_type[0] == 'f':
+                    if data_type[0] == "f":
                         comp = "o" + comp
                 elif operator == "!=":
                     op_name = "cmp"
                     comp = "ne"
-                    if data_type[0] == 'f':
+                    if data_type[0] == "f":
                         comp = "o" + comp
                 else:
                     raise NotImplementedError(f"Unimplemented binary operator '{op_name}'")
@@ -217,9 +217,7 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         global_variables = self.global_variables_
         for param in parameters:
             global_variables[param.name] = AttrDict(
-                is_constexpr=False,
-                value=None,
-                data_type=param.data_type,
+                is_constexpr=False, value=None, data_type=param.data_type
             )
             if param.data_type in [gt_ir.DataType.BOOL]:
                 global_variables[param.name].value = param.init or False
@@ -247,7 +245,7 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         if value not in self.constants_:
             literal_access_expr = AttrDict(
                 value=float(value),
-                data_type="f64", #str(data_type).replace("FLOAT", "f").replace("INT", "i"),
+                data_type="f64",  # str(data_type).replace("FLOAT", "f").replace("INT", "i"),
                 node_type=gt_ir.ScalarLiteral,
             )
         else:
@@ -300,7 +298,8 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         operand = self.visit(node.arg)
         if op == "+":
             rhs = self.stack_[-1]
-            return self.operations_[rhs]     # Do nothing for plus operator (leave operand untouched on the stack)
+            # Do nothing for plus operator (leave operand untouched on the stack)
+            return self.operations_[rhs]
         else:
             # Pop operand off the stack...
             rhs = self.stack_.pop()
@@ -345,7 +344,7 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         return bin_op_expr
 
     def visit_TernaryOpExpr(self, node: gt_ir.TernaryOpExpr, **kwargs):
-        if not isinstance(node.condition,  gt_ir.BinOpExpr):
+        if not isinstance(node.condition, gt_ir.BinOpExpr):
             zero = gt_ir.ScalarLiteral(value=0.0, data_type=gt_ir.DataType.INT64)
             bin_op = gt_ir.BinOpExpr(op=gt_ir.BinaryOperator.NE, lhs=node.condition, rhs=zero)
             cond = self.visit(bin_op)
@@ -411,23 +410,24 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
             out_name = lhs_op.name
             out_field = self._get_field(out_name)
 
-            if out_name in self.out_counts_:
-                self.out_counts_[out_name] += 1
-                out_name += str(self.out_counts_[out_name])
-            else:
-                self.out_counts_[out_name] = 0
-
             out_field.data_type = "f64"  # TODO: Where is AUTO data type coming from?
             temp_type = f"!stencil.temp<{out_field.dimensions}{out_field.data_type}>"
             indent = self.indent_
 
+            if not out_field.is_temporary and out_field.intent != Intent.OUT:
+                if out_name in self.out_counts_:
+                    self.out_counts_[out_name] += 1
+                else:
+                    self.out_counts_[out_name] = 0
+                out_name += "_" + str(self.out_counts_[out_name])
+
             line = (indent * 2) + f"%{out_name} = stencil.apply ("
             for field_name in self.field_refs_:
                 if field_name != out_name:
-                    line += f"%%arg%d = %%%s : {temp_type}, " % (
-                        self.field_refs_[field_name],
-                        field_name,
-                    )
+                    num_refs = self.field_refs_[field_name]
+                    if not out_name.startswith(field_name) and field_name in self.out_counts_:
+                        field_name += "_" + str(self.out_counts_[field_name])
+                    line += f"%%arg%d = %%%s : {temp_type}, " % (num_refs, field_name)
 
             line = line[0 : len(line) - 2] + f") -> {temp_type} " + "{\n"
             self.file_.write(line)
@@ -493,9 +493,9 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         if self.file_:
             indent = self.indent_
             # TODO: Determine whether field is output based on AST traversal...
-            if 'Grad' in stencil_name:
+            if "Grad" in stencil_name:
                 fields[0].intent = fields[1].intent = Intent.INOUT
-            elif 'UV' in stencil_name:
+            elif "UV" in stencil_name:
                 fields[-2].intent = fields[-1].intent = Intent.OUT
             else:
                 fields[-1].intent = Intent.OUT
@@ -547,9 +547,14 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
                     # stencil.store %output to %output_fd ([0, 0, 0]:[64, 64, 64]) : !stencil.temp<ijk,f64> to !stencil.field<ijk,f64>
                     field_type = f"!stencil.field<{field.dimensions}{field.data_type}>"
                     temp_type = f"!stencil.temp<{field.dimensions}{field.data_type}>"
+
+                    from_name = field.name
+                    if field.name in self.out_counts_:
+                        from_name += "_%d" % self.out_counts_[field.name]
+
                     self.file_.write(
                         (indent * 2)
-                        + f"stencil.store %{field.name} to %{field.name}_fd([{origin}] : [{field_sizes}]) : {temp_type} to {field_type}\n"
+                        + f"stencil.store %{from_name} to %{field.name}_fd([{origin}] : [{field_sizes}]) : {temp_type} to {field_type}\n"
                     )
 
             self.file_.write((indent * 2) + "return\n }\n}\n")
@@ -668,7 +673,7 @@ class MLIRBackend(gt_backend.BasePyExtBackend):
             "--cse",
         ]
 
-        is_cuda = True #"cuda" in mlir_backend
+        is_cuda = True  # "cuda" in mlir_backend
         if is_cuda:
             optimizations.extend(
                 ["--stencil-loop-mapping=block-sizes=128,1,1", "--convert-parallel-loops-to-gpu"]
@@ -690,7 +695,7 @@ class MLIRBackend(gt_backend.BasePyExtBackend):
         mlir_in = mlir.file_name
         mlir_out = os.path.splitext(mlir_in)[0] + "_lower.mlir"
         encoding = "utf-8"
-        gen_files = True # not os.path.exists(mlir_out)
+        gen_files = True  # not os.path.exists(mlir_out)
 
         command = [tools.opt]
         command.extend(optimizations)

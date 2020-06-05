@@ -51,12 +51,14 @@ const std::string test_path = "{{ test_path }}/";
 
 template <typename T>
 bool compare_values(T expected, T actual, T precision) {
-  if(std::fabs(expected) < 1e-3 && std::fabs(actual) < 1e-3) {
-    if(std::fabs(expected - actual) < precision)
-      return true;
-  } else {
-    if(std::fabs((expected - actual) / (precision * expected)) < 1.0)
-      return true;
+  if(!std::isnan(actual)) {
+    if(std::fabs(expected) < 1e-3 && std::fabs(actual) < 1e-3) {
+      if(std::fabs(expected - actual) < precision)
+        return true;
+    } else {
+      if(std::fabs((expected - actual) / (precision * expected)) < 1.0)
+        return true;
+    }
   }
   return false;
 }

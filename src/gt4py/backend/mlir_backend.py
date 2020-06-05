@@ -30,6 +30,7 @@ import subprocess as sub
 from collections import deque
 from collections import OrderedDict
 
+from gt4py import analysis as gt_analysis
 from gt4py import backend as gt_backend
 from gt4py import definitions as gt_definitions
 from gt4py import ir as gt_ir
@@ -59,21 +60,23 @@ class Intent(enum.Enum):
 
 class MLIRConverter(gt_ir.IRNodeVisitor):
     @classmethod
-    def apply(cls, definition_ir):
-        return cls()(definition_ir)
+    def apply(cls, definition_ir, implementation_ir=None):
+        return cls()(definition_ir, implementation_ir)
 
     def __call__(
         self,
         definition_ir,
+        implementation_ir=None,
         indent="  ",
         field_size=DEFAULT_FIELD_SIZE,
         halo_size=DEFAULT_HALO_SIZE,
     ):
-        self.fields_ = []
+        self.implementation_ir_ = implementation_ir
         self.indent_ = indent
         self.field_size_ = field_size
         self.halo_size_ = halo_size
 
+        self.fields_ = []
         self.stack_ = deque()
         self.body_ = []
         self.constants_ = {}
@@ -213,6 +216,34 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
                 return field
         return None
 
+    def _compute_field_info(self):
+        implementation_ir = self.implementation_ir_
+
+        # Collect access type per field
+        out_fields = set()
+        for ms in implementation_ir.multi_stages:
+            for sg in ms.groups:
+                for st in sg.stages:
+                    for acc in st.accessors:
+                        if (
+                                isinstance(acc, gt_ir.FieldAccessor)
+                                and acc.intent == gt_ir.AccessIntent.READ_WRITE
+                        ):
+                            out_fields.add(acc.symbol)
+
+        for arg in implementation_ir.api_signature:
+            if arg.name in implementation_ir.fields:
+                access = (
+                    gt_definitions.AccessKind.READ_WRITE
+                    if arg.name in out_fields
+                    else gt_definitions.AccessKind.READ_ONLY
+                )
+                if arg.name not in implementation_ir.unreferenced:
+                    field = self._get_field(arg.name)
+                    if field:
+                        field.intent = access
+                        field.boundary = implementation_ir.fields_extents[arg.name].to_boundary()
+
     def _make_global_variables(self, parameters: list, externals: dict):
         global_variables = self.global_variables_
         for param in parameters:
@@ -272,8 +303,9 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
             dimensions="?x" * len(node.axes),  # """.join(node.axes).lower(),
             is_temporary=(not node.is_api),
             data_type=str(node.data_type).replace("FLOAT", "f"),
-            intent=Intent.IN,
+            intent=gt_ir.AccessIntent.READ_WRITE,
             node_type=gt_ir.FieldDecl,
+            boundary=None,
         )
         self.fields_.append(field)
         return field
@@ -485,6 +517,7 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
 
         self._make_global_variables(node.parameters, node.externals)
         fields = [self.visit(field) for field in node.api_fields]
+        self._compute_field_info()
 
         stencil_name = node.name.split(".")[-1]
         file_name = os.path.join(os.getcwd(), "mlir", stencil_name + ".mlir")
@@ -617,12 +650,9 @@ class MLIRBackend(gt_backend.BasePyExtBackend):
         definition_func: types.FunctionType,
         options: gt_definitions.BuildOptions,
     ):
-        # TODO: move this import to the top and find a better way to avoid circular imports
-        from gt4py import gt_src_manager
-
         cls._check_options(options)
+        module_kwargs = {"implementation_ir": gt_analysis.transform(definition_ir, options)}
 
-        module_kwargs = {"implementation_ir": None}
         pyext_module_name, pyext_file_path = cls.generate_extension(
             stencil_id, definition_ir, options, module_kwargs=module_kwargs
         )
@@ -641,9 +671,9 @@ class MLIRBackend(gt_backend.BasePyExtBackend):
 
     @classmethod
     def generate_extension_sources(
-        cls, stencil_id, definition_ir, options, gt_backend_t, default_opts=True
+        cls, stencil_id, definition_ir, implementation_ir, options, gt_backend_t, default_opts=True
     ):
-        mlir = MLIRConverter.apply(definition_ir)
+        mlir = MLIRConverter.apply(definition_ir, implementation_ir)
         stencil_short_name = stencil_id.qualified_name.split(".")[-1]
 
         backend_opts = dict(**options.backend_opts)
@@ -888,17 +918,18 @@ class MLIRBackend(gt_backend.BasePyExtBackend):
         cls, stencil_id, definition_ir, options, *, uses_cuda=False, **kwargs
     ):
         module_kwargs = kwargs["module_kwargs"]
-        dawn_src_file = f"_dawn_{stencil_id.qualified_name.split('.')[-1]}.hpp"
+        implementation_ir = module_kwargs["implementation_ir"]
+        mlir_src_file = f"{stencil_id.qualified_name.split('.')[-1]}.mlir"
 
         # Generate source
         if options.dev_opts.get("code-generation", True):
             gt_pyext_sources = cls.generate_extension_sources(
-                stencil_id, definition_ir, options, cls.GT_BACKEND_T
+                stencil_id, definition_ir, implementation_ir, options, cls.GT_BACKEND_T
             )
         else:
             # Pass NOTHING to the builder means try to reuse the source code files
             gt_pyext_sources = {key: gt_utils.NOTHING for key in cls.TEMPLATE_FILES.keys()}
-            gt_pyext_sources[dawn_src_file] = gt_utils.NOTHING
+            gt_pyext_sources[mlir_src_file] = gt_utils.NOTHING
 
         final_ext = ".cu" if uses_cuda else ".cpp"
         keys = list(gt_pyext_sources.keys())

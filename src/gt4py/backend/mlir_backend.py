@@ -58,25 +58,66 @@ class Intent(enum.Enum):
     INOUT = 2
 
 
+class FieldInfoCollector(gt_ir.IRNodeVisitor):
+    @classmethod
+    def apply(cls, definition_ir):
+        return cls()(definition_ir)
+
+    def __call__(self, definition_ir):
+        self.fields_ = OrderedDict()
+        self.on_left_ = False
+        self.visit(definition_ir)
+        return self.fields_
+
+    def visit_FieldDecl(self, node: gt_ir.FieldDecl, **kwargs):
+        field = AttrDict(
+            name=node.name,
+            dimensions="?x" * len(node.axes),
+            is_temporary=(not node.is_api),
+            data_type=str(node.data_type).replace("FLOAT", "f"),
+            intent=None,  # gt_ir.AccessIntent.READ_WRITE,
+            node_type=gt_ir.FieldDecl,
+        )
+        self.fields_[field.name] = field
+
+    def visit_FieldRef(self, node: gt_ir.FieldRef, **kwargs):
+        field = self.fields_[node.name]
+        if self.on_left_:
+            if field.intent is None:
+                field.intent = Intent.OUT
+            elif field.intent == Intent.IN:
+                field.intent = Intent.INOUT
+        else:
+            if field.intent is None:
+                field.intent = Intent.IN
+            elif field.intent == Intent.OUT:
+                field.intent = Intent.INOUT
+
+    def visit_Assign(self, node: gt_ir.Assign, **kwargs):
+        self.on_left_ = True
+        left = self.visit(node.target)
+        self.on_left_ = False
+        right = self.visit(node.value)
+
+
 class MLIRConverter(gt_ir.IRNodeVisitor):
     @classmethod
-    def apply(cls, definition_ir, implementation_ir=None):
-        return cls()(definition_ir, implementation_ir)
+    def apply(cls, definition_ir, fields):
+        return cls()(definition_ir, fields)
 
     def __call__(
         self,
         definition_ir,
-        implementation_ir=None,
+        fields=(),
         indent="  ",
         field_size=DEFAULT_FIELD_SIZE,
         halo_size=DEFAULT_HALO_SIZE,
     ):
-        self.implementation_ir_ = implementation_ir
+        self.fields_ = fields
         self.indent_ = indent
         self.field_size_ = field_size
         self.halo_size_ = halo_size
 
-        self.fields_ = []
         self.stack_ = deque()
         self.body_ = []
         self.constants_ = {}
@@ -137,7 +178,7 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
 
             elif type == gt_ir.FieldRef:
                 # %a0 = stencil.access %arg1[0, 0, 0] : (!stencil.temp<?x?x?xf64>) -> f64
-                field = self._get_field(operation.name)
+                field = self.fields_[operation.name]
                 field_ref = self.field_refs_[field.name]
                 arg_name = "arg%d" % field_ref
                 offset = ", ".join([str(index) for index in operation.offset])
@@ -210,40 +251,6 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
 
         return operation
 
-    def _get_field(self, name):
-        for field in self.fields_:
-            if field.name == name:
-                return field
-        return None
-
-    def _compute_field_info(self):
-        implementation_ir = self.implementation_ir_
-
-        # Collect access type per field
-        out_fields = set()
-        for ms in implementation_ir.multi_stages:
-            for sg in ms.groups:
-                for st in sg.stages:
-                    for acc in st.accessors:
-                        if (
-                                isinstance(acc, gt_ir.FieldAccessor)
-                                and acc.intent == gt_ir.AccessIntent.READ_WRITE
-                        ):
-                            out_fields.add(acc.symbol)
-
-        for arg in implementation_ir.api_signature:
-            if arg.name in implementation_ir.fields:
-                access = (
-                    gt_definitions.AccessKind.READ_WRITE
-                    if arg.name in out_fields
-                    else gt_definitions.AccessKind.READ_ONLY
-                )
-                if arg.name not in implementation_ir.unreferenced:
-                    field = self._get_field(arg.name)
-                    if field:
-                        field.intent = access
-                        field.boundary = implementation_ir.fields_extents[arg.name].to_boundary()
-
     def _make_global_variables(self, parameters: list, externals: dict):
         global_variables = self.global_variables_
         for param in parameters:
@@ -298,22 +305,11 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
             return AttrDict(name=node.name, is_external=True, type=gt_ir.VarRef)
 
     def visit_FieldDecl(self, node: gt_ir.FieldDecl, **kwargs):
-        field = AttrDict(
-            name=node.name,
-            dimensions="?x" * len(node.axes),  # """.join(node.axes).lower(),
-            is_temporary=(not node.is_api),
-            data_type=str(node.data_type).replace("FLOAT", "f"),
-            intent=gt_ir.AccessIntent.READ_WRITE,
-            node_type=gt_ir.FieldDecl,
-            boundary=None,
-        )
-        self.fields_.append(field)
-        return field
+        return self.fields_[node.name]
 
     def visit_FieldRef(self, node: gt_ir.FieldRef, **kwargs):
-        field = self._get_field(node.name)
+        field = self.fields_[node.name]
         offset = [node.offset[ax] if ax in node.offset else 0 for ax in DOMAIN_AXES]
-
         field_access_expr = AttrDict(
             name=node.name, offset=offset, data_type=field.data_type, node_type=gt_ir.FieldRef
         )
@@ -440,9 +436,9 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         if self.file_:
             # %lap = stencil.apply %arg1 = %input : !stencil.temp<ijk,f64> {
             out_name = lhs_op.name
-            out_field = self._get_field(out_name)
+            out_field = self.fields_[out_name]
 
-            out_field.data_type = "f64"  # TODO: Where is AUTO data type coming from?
+            out_field.data_type = "f64"  # AUTO data type comes from temporaries...
             temp_type = f"!stencil.temp<{out_field.dimensions}{out_field.data_type}>"
             indent = self.indent_
 
@@ -516,8 +512,7 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         functions = []
 
         self._make_global_variables(node.parameters, node.externals)
-        fields = [self.visit(field) for field in node.api_fields]
-        self._compute_field_info()
+        fields = self.fields_ #[self.visit(field) for field in node.api_fields]
 
         stencil_name = node.name.split(".")[-1]
         file_name = os.path.join(os.getcwd(), "mlir", stencil_name + ".mlir")
@@ -525,18 +520,11 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
 
         if self.file_:
             indent = self.indent_
-            # TODO: Determine whether field is output based on AST traversal...
-            if "Grad" in stencil_name:
-                fields[0].intent = fields[1].intent = Intent.INOUT
-            elif "UV" in stencil_name:
-                fields[-2].intent = fields[-1].intent = Intent.OUT
-            else:
-                fields[-1].intent = Intent.OUT
-
             self.file_.write("module {\n")
             self.file_.write(indent + f"func @{stencil_name}(")
+
             field_defs = []
-            for field in fields:
+            for field in fields.values():
                 if not field.is_temporary:
                     field_defs.append(
                         f"%{field.name}_fd : !stencil.field<{field.dimensions}{field.data_type}>"
@@ -544,7 +532,7 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
             self.file_.write(", ".join(field_defs) + ") attributes { stencil.program } {\n")
 
             # Assert fields...
-            for field in fields:
+            for field in fields.values():
                 if not field.is_temporary:
                     # stencil.assert %input_fd ([-4, -4, -4]:[68, 68, 68]) : !stencil.field<ijk,f64>
                     halo_size = self.halo_size_
@@ -556,7 +544,7 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
             self.file_.write("\n")
 
             # Load input fields...
-            for field in fields:
+            for field in fields.values():
                 if not field.is_temporary and field.intent != Intent.OUT:
                     # %input = stencil.load %input_fd : (!stencil.field<ijk,f64>) -> !stencil.temp<ijk,f64>
                     field_type = f"!stencil.field<{field.dimensions}{field.data_type}>"
@@ -575,7 +563,7 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
             field_size_str = str(self.field_size_)
             field_sizes = field_size_str + ", " + field_size_str + ", " + field_size_str
 
-            for field in fields:
+            for field in fields.values():
                 if not field.is_temporary and field.intent != Intent.IN:
                     # stencil.store %output to %output_fd ([0, 0, 0]:[64, 64, 64]) : !stencil.temp<ijk,f64> to !stencil.field<ijk,f64>
                     field_type = f"!stencil.field<{field.dimensions}{field.data_type}>"
@@ -651,7 +639,7 @@ class MLIRBackend(gt_backend.BasePyExtBackend):
         options: gt_definitions.BuildOptions,
     ):
         cls._check_options(options)
-        module_kwargs = {"implementation_ir": gt_analysis.transform(definition_ir, options)}
+        module_kwargs = {"implementation_ir": None}
 
         pyext_module_name, pyext_file_path = cls.generate_extension(
             stencil_id, definition_ir, options, module_kwargs=module_kwargs
@@ -671,11 +659,12 @@ class MLIRBackend(gt_backend.BasePyExtBackend):
 
     @classmethod
     def generate_extension_sources(
-        cls, stencil_id, definition_ir, implementation_ir, options, gt_backend_t, default_opts=True
+        cls, stencil_id, definition_ir, options, gt_backend_t, default_opts=True
     ):
-        mlir = MLIRConverter.apply(definition_ir, implementation_ir)
-        stencil_short_name = stencil_id.qualified_name.split(".")[-1]
+        fields = FieldInfoCollector.apply(definition_ir)
+        mlir = MLIRConverter.apply(definition_ir, fields)
 
+        stencil_short_name = stencil_id.qualified_name.split(".")[-1]
         backend_opts = dict(**options.backend_opts)
         mlir_backend = cls.MLIR_BACKEND_NAME
 
@@ -918,13 +907,12 @@ class MLIRBackend(gt_backend.BasePyExtBackend):
         cls, stencil_id, definition_ir, options, *, uses_cuda=False, **kwargs
     ):
         module_kwargs = kwargs["module_kwargs"]
-        implementation_ir = module_kwargs["implementation_ir"]
         mlir_src_file = f"{stencil_id.qualified_name.split('.')[-1]}.mlir"
 
         # Generate source
         if options.dev_opts.get("code-generation", True):
             gt_pyext_sources = cls.generate_extension_sources(
-                stencil_id, definition_ir, implementation_ir, options, cls.GT_BACKEND_T
+                stencil_id, definition_ir, options, cls.GT_BACKEND_T
             )
         else:
             # Pass NOTHING to the builder means try to reuse the source code files

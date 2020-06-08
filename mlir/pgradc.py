@@ -25,7 +25,7 @@ def PGradC(
             + (gz[-1, 0, 0] - gz[0, 0, 1]) * (pkc[-1, 0, 1] - pkc)
         )
         # p_grad_c_vstencil
-        vc_in = uc_in + dt2 * rdyc / (wk[0, -1, 0] + wk) * (
+        vc_in = vc_in + dt2 * rdyc / (wk[0, -1, 0] + wk) * (
             (gz[0, -1, 1] - gz) * (pkc[0, 0, 1] - pkc[0, -1, 0])
             + (gz[0, -1, 0] - gz[0, 0, 1]) * (pkc[0, -1, 1] - pkc)
         )

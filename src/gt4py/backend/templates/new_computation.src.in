@@ -52,8 +52,6 @@
 
 #include "computation.hpp"
 
-#include <gridtools/stencil_composition/stencil_composition.hpp>
-
 #include <array>
 #include <cassert>
 #include <stdexcept>

@@ -19,6 +19,7 @@ from .base import *
 from .debug_backend import *
 from .numpy_backend import *
 from .gt_backends import *
+from .new_backends import *
 
 try:
     import dawn4py

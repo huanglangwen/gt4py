@@ -139,6 +139,9 @@ class {{ class_name }}(StencilObject):
 {{ post_run }}
 {%- endfilter %}
 
+        if exec_info is not None:
+            exec_info["call_end_time"] = time.perf_counter()
+
     def run(self, _domain_, _origin_, exec_info, *, {{- field_names|join(", ") -}}, {{- param_names|join(", ") -}}):
         if exec_info is not None:
             exec_info["domain"] = _domain_

@@ -396,7 +396,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
 
         template_args = dict(
             arg_fields=arg_fields,
-            dawn_backend=dawn_namespace,
+            dawn_namespace=dawn_namespace,
             gt_backend=gt_backend_t,
             header_file=header_file,
             module_name=module_name,

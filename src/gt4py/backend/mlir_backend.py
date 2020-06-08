@@ -58,12 +58,22 @@ class Intent(enum.Enum):
     INOUT = 2
 
 
+def _is_relational(op: gt_ir.BinaryOperator):
+    return "<" in op.python_symbol or ">" in op.python_symbol or "=" in op.python_symbol
+
+
+def _binary_to_ternary(bin_op_expr: gt_ir.BinOpExpr):
+    zero = gt_ir.ScalarLiteral(value=0.0, data_type=gt_ir.DataType.FLOAT64)
+    one = gt_ir.ScalarLiteral(value=1.0, data_type=gt_ir.DataType.FLOAT64)
+    return gt_ir.TernaryOpExpr(condition=bin_op_expr, then_expr=one, else_expr=zero)
+
+
 class FieldInfoCollector(gt_ir.IRNodeVisitor):
     @classmethod
     def apply(cls, definition_ir):
         return cls()(definition_ir)
 
-    def __call__(self, definition_ir):
+    def __call__(self, definition_ir: gt_ir.StencilDefinition):
         self.fields_ = OrderedDict()
         self.on_left_ = False
         self.visit(definition_ir)
@@ -75,7 +85,7 @@ class FieldInfoCollector(gt_ir.IRNodeVisitor):
             dimensions="?x" * len(node.axes),
             is_temporary=(not node.is_api),
             data_type=str(node.data_type).replace("FLOAT", "f"),
-            intent=None,  # gt_ir.AccessIntent.READ_WRITE,
+            intent=None,
             node_type=gt_ir.FieldDecl,
         )
         self.fields_[field.name] = field
@@ -102,7 +112,7 @@ class FieldInfoCollector(gt_ir.IRNodeVisitor):
 
 class MLIRConverter(gt_ir.IRNodeVisitor):
     @classmethod
-    def apply(cls, definition_ir, fields):
+    def apply(cls, definition_ir: gt_ir.StencilDefinition, fields: OrderedDict):
         return cls()(definition_ir, fields)
 
     def __call__(
@@ -373,7 +383,7 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
 
     def visit_TernaryOpExpr(self, node: gt_ir.TernaryOpExpr, **kwargs):
         if not isinstance(node.condition, gt_ir.BinOpExpr):
-            zero = gt_ir.ScalarLiteral(value=0.0, data_type=gt_ir.DataType.INT64)
+            zero = gt_ir.ScalarLiteral(value=0.0, data_type=gt_ir.DataType.FLOAT64)
             bin_op = gt_ir.BinOpExpr(op=gt_ir.BinaryOperator.NE, lhs=node.condition, rhs=zero)
             cond = self.visit(bin_op)
         else:
@@ -407,9 +417,7 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         return ternary_op_expr
 
     def visit_BlockStmt(self, node: gt_ir.BlockStmt, *, make_block=True, **kwargs):
-        statements = [
-            self.visit(stmt) for stmt in node.stmts
-        ]  # if not isinstance(stmt, gt_ir.FieldDecl)]
+        statements = [self.visit(stmt) for stmt in node.stmts]
         if make_block:
             stmts = AttrDict(statements=statements, node_type=gt_ir.BlockStmt)
         return statements
@@ -417,8 +425,13 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
     def visit_Assign(self, node: gt_ir.Assign, **kwargs):
         self.reset()
 
+        value_node = node.value
+        if isinstance(value_node, gt_ir.BinOpExpr) and _is_relational(value_node.op):
+            # Convert this BinOpExpr into a TernaryOpExpr...
+            value_node = _binary_to_ternary(value_node)
+
         left = self.visit(node.target)
-        right = self.visit(node.value)
+        right = self.visit(value_node)
 
         # At this point we expect two items on the stack, the rhs expression, and the destination store, lhs
         rhs = self.stack_.pop()

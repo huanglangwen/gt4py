@@ -60,9 +60,7 @@ static constexpr uint_t k_axis_n_intervals = {{ k_axis.n_intervals }};
 static constexpr uint_t ndim = {{ max_ndim }};
 
 // These halo sizes are used to determine the sizes of the temporaries
-static constexpr uint_t halo_size_i = {{ halo_sizes[0] }};
-static constexpr uint_t halo_size_j = {{ halo_sizes[1] }};
-static constexpr uint_t halo_size_k = {{ halo_sizes[2] }};
+static uint_t halo_sizes[] = { {{ halo_sizes[0] }}, {{ halo_sizes[1] }}, {{ halo_sizes[2] }} };
 
 {% if constants -%}
 // Constants
@@ -77,6 +75,22 @@ static constexpr auto {{ name }} = {{ value }};
 using p_{{ field.name }} = gt::tmp_arg<{{ loop.index0 }}, data_store_t<{{ field.dtype }}, 0>>;
 {%- endfor %}
 {%- endif %}
+
+std::array<uint_t, ndim> get_min_origin(
+    const std::initializer_list<const std::array<uint_t, ndim>>& origins) {
+    std::array<uint_t, ndim> min_origin = *origins.begin();
+    for(const auto& origin : origins) {
+        for(uint_t i = 0; i < ndim; ++i) {
+            if(origin[i] < min_origin[i])
+                min_origin[i] = origin[i];
+        }
+    }
+    for(uint_t i = 0; i < ndim; ++i) {
+        if(halo_sizes[i] < min_origin[i])
+          halo_sizes[i] = min_origin[i];
+    }
+    return min_origin;
+}
 
 template <typename DataType = float64_t> struct data_store_t {
     std::array<uint_t, ndim> shape;
@@ -114,7 +128,7 @@ data_store_t<DataType> make_data_store(const BufferInfo& bi,
     DataType* ptr = static_cast<DataType*>(bi.ptr);
     for (uint_t i = 0; i < ndim; ++i) {
         strides[i] = bi.strides[i] / sizeof(DataType);
-        ptr += strides[i] * origin[i];
+        ptr += strides[i] * (origin[i] - halo_sizes[i]);
         dims[i] = compute_domain_shape[i]+2*origin[i];
     }
     return data_store_t<DataType>{dims, strides, ptr};
@@ -122,36 +136,35 @@ data_store_t<DataType> make_data_store(const BufferInfo& bi,
 
 }  // namespace
 
-{% if parameters -%}
-// Global parameters
-{% for param in parameters -%}
-{{ param.dtype }} {{ param.name }}_param = ({{ param.dtype }}) 0;
-{%- endfor %}
-{%- endif %}
-
 // Run actual computation
 void run(const std::array<uint_t, ndim>& domain,
 {%- set comma = joiner(", ") %}
 {%- for field in arg_fields -%}
          {{- comma() }}
-         const BufferInfo& bi_{{ field.name }} {{- comma() -}} const std::array<uint_t, 3>& {{ field.name }}_origin
+         const BufferInfo& bi_{{ field.name }} {{- comma() -}} const std::array<uint_t, ndim>& {{ field.name }}_origin
 {%- endfor %}
 {%- for param in parameters %}
          {{- comma() }}
          {{ param.dtype }} {{ param.name }}
-{%- endfor %})
-{
+{%- endfor %}) {
+    // Compute min origin
+    std::array<uint_t, ndim> min_origin = get_min_origin({
+{%- for field in arg_fields -%}
+         {{ field.name }}_origin {{ comma() if not loop.last }}
+{%- endfor -%}
+    });
+
     // Initialize data stores from input buffers
 {%- for field in arg_fields %}
     auto {{ field.name }} = make_data_store<{{ field.dtype }}>(bi_{{ field.name }}, domain, {{ field.name }}_origin);
 {%- endfor %}
 
-    int i_min = halo_size_i;
-    int i_max = domain[0] + halo_size_i - 1;
-    int j_min = halo_size_j;
-    int j_max = domain[1] + halo_size_j - 1;
-    int k_min = halo_size_k;
-    int k_max = domain[2] + halo_size_k - 1;
+    int i_min = halo_sizes[0];
+    int i_max = domain[0] + i_min - 1;
+    int j_min = halo_sizes[1];
+    int j_max = domain[1] + j_min - 1;
+    int k_min = halo_sizes[2];
+    int k_max = domain[2] + k_min - 1;
 
 {% for multi in multi_stages %}
 {%- if multi.exec == "parallel" %}

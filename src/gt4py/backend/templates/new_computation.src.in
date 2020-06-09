@@ -76,21 +76,21 @@ using p_{{ field.name }} = gt::tmp_arg<{{ loop.index0 }}, data_store_t<{{ field.
 {%- endfor %}
 {%- endif %}
 
-std::array<uint_t, ndim> get_min_origin(
-    const std::initializer_list<const std::array<uint_t, ndim>>& origins) {
-    std::array<uint_t, ndim> min_origin = *origins.begin();
-    for(const auto& origin : origins) {
-        for(uint_t i = 0; i < ndim; ++i) {
-            if(origin[i] < min_origin[i])
-                min_origin[i] = origin[i];
-        }
-    }
-    for(uint_t i = 0; i < ndim; ++i) {
-        if(halo_sizes[i] < min_origin[i])
-          halo_sizes[i] = min_origin[i];
-    }
-    return min_origin;
-}
+//std::array<uint_t, ndim> get_min_origin(
+//    const std::initializer_list<const std::array<uint_t, ndim>>& origins) {
+//    std::array<uint_t, ndim> min_origin = *origins.begin();
+//    for(const auto& origin : origins) {
+//        for(uint_t i = 0; i < ndim; ++i) {
+//            if(origin[i] < min_origin[i])
+//                min_origin[i] = origin[i];
+//        }
+//    }
+//    for(uint_t i = 0; i < ndim; ++i) {
+//        if(halo_sizes[i] < min_origin[i])
+//          halo_sizes[i] = min_origin[i];
+//    }
+//    return min_origin;
+//}
 
 template <typename DataType = float64_t> struct data_store_t {
     std::array<uint_t, ndim> shape;
@@ -147,13 +147,13 @@ void run(const std::array<uint_t, ndim>& domain,
          {{- comma() }}
          {{ param.dtype }} {{ param.name }}
 {%- endfor %}) {
-    // Compute min origin
+    /* Compute min origin
     std::array<uint_t, ndim> min_origin = get_min_origin({
 {%- for field in arg_fields -%}
          {{ field.name }}_origin {{ comma() if not loop.last }}
 {%- endfor -%}
     });
-
+    */
     // Initialize data stores from input buffers
 {%- for field in arg_fields %}
     auto {{ field.name }} = make_data_store<{{ field.dtype }}>(bi_{{ field.name }}, domain, {{ field.name }}_origin);

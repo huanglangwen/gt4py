@@ -56,7 +56,7 @@ class CXXOptExtGenerator(gt_backend.GTPyExtGenerator):
     TEMPLATE_FILES["computation.hpp"] = "new_computation.hpp.in"
     TEMPLATE_FILES["computation.src"] = "new_computation.src.in"
 
-    ITERATORS = ('i', 'j', 'k')
+    ITERATORS = ("i", "j", "k")
 
     def __init__(self, class_name, module_name, gt_backend_t, options):
         super().__init__(class_name, module_name, gt_backend_t, options)
@@ -138,16 +138,40 @@ class CXXOptExtGenerator(gt_backend.GTPyExtGenerator):
             if name not in node.unreferenced
         ]
 
-        stage_functors = {}
+        steps = []
+        multi_stages = []
+
         for multi_stage in node.multi_stages:
             for group in multi_stage.groups:
+                interval = []
                 for stage in group.stages:
-                    stage_functors[stage.name] = self.visit(stage)
+                    stage_start = stage.apply_blocks[0].interval.start
+                    start_level = "min" if stage_start.level == gt_ir.LevelMarker.START else "max"
+                    stage_end = stage.apply_blocks[0].interval.end
+                    end_level = "min" if stage_end.level == gt_ir.LevelMarker.START else "max"
+                    interval = [
+                        dict(level=start_level, offset=stage_start.offset),
+                        dict(level=end_level, offset=stage_end.offset),
+                    ]
 
-        multi_stages = []
-        for multi_stage in node.multi_stages:
-            steps = [stage_functors[stage.name] for group in multi_stage.groups for stage in group.stages]
-            multi_stages.append({"exec": str(multi_stage.iteration_order).lower(), "steps": steps})
+                    extents = []
+                    compute_extent = stage.compute_extent
+                    for i in range(compute_extent.ndims):
+                        extents.extend(
+                            [compute_extent.lower_indices[i], compute_extent.upper_indices[i]]
+                        )
+
+                    step = self.visit(stage)
+                    step["extents"] = extents
+                    steps.append(step)
+
+            multi_stages.append(
+                {
+                    "exec": str(multi_stage.iteration_order).lower(),
+                    "interval": interval,
+                    "steps": steps,
+                }
+            )
 
         template_args = dict(
             arg_fields=arg_fields,
@@ -168,6 +192,7 @@ class CXXOptExtGenerator(gt_backend.GTPyExtGenerator):
             sources[key] = template.render(**template_args)
 
         return sources
+
 
 @gt_backend.register
 class CXXOptBackend(gt_backend.BaseGTBackend):

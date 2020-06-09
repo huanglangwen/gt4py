@@ -22,7 +22,7 @@
     - halo_sizes: [int]
     - k_axis: { "n_intervals": int, "offset_limit": int}
     - max_ndim: int
-    - multi_stages: [{ "exec": str, "steps": [{
+    - multi_stages: [{ "exec": str, "interval": [{ "level": str, "offset": int }], "steps": [{
             "args": [
                 {
                     "name": str
@@ -36,7 +36,8 @@
                     "interval_end": (level:int, offset:int),
                     "body": str
                 }
-            ]
+            ],
+            "extents": [int]
         }]}]
     - parameters: [{ "name": str, "dtype": str }]
     - stencil_unique_name: str
@@ -60,7 +61,10 @@ static constexpr uint_t k_axis_n_intervals = {{ k_axis.n_intervals }};
 static constexpr uint_t ndim = {{ max_ndim }};
 
 // These halo sizes are used to determine the sizes of the temporaries
-static uint_t halo_sizes[] = { {{ halo_sizes[0] }}, {{ halo_sizes[1] }}, {{ halo_sizes[2] }} };
+static const uint_t halo_sizes[] = { {{ halo_sizes[0] }}, {{ halo_sizes[1] }}, {{ halo_sizes[2] }} };
+{% if tmp_fields -%}
+static int temp_offset = -1;
+{%- endif %}
 
 {% if constants -%}
 // Constants
@@ -127,6 +131,7 @@ data_store_t<DataType> make_data_store(const BufferInfo& bi,
     return data_store_t<DataType>{dims, strides, ptr};
 }
 
+{% if tmp_fields -%}
 template<typename DataType>
 data_store_t<DataType> make_temp_store(const std::array<uint_t, ndim>& compute_domain) {
     // Compute dims
@@ -150,9 +155,17 @@ data_store_t<DataType> make_temp_store(const std::array<uint_t, ndim>& compute_d
     // Allocate pointer and shift by halo offset...
     DataType* ptr = new DataType[data_size];
     ptr += offset;
+    temp_offset = offset;
 
     return data_store_t<DataType>{dims, strides, ptr};
 }
+
+template<typename DataType>
+void free_temp_store(data_store_t<DataType>& temp) {
+    temp.ptr -= temp_offset;
+    delete[] temp.ptr;
+}
+{%- endif %}
 
 }  // namespace
 
@@ -198,15 +211,15 @@ void run(const std::array<uint_t, ndim>& domain,
     #pragma omp parallel for schedule(runtime)
 {%- endif %}
 {%- if multi.exec == "backward" %}
-    for (int k = k_max + 0; k >= k_min + 0; --k) {
+    for (int k = k_{{ multi.interval[1].level }} + {{ multi.interval[1].offset }} + {{ multi.steps[0].extents[5] }}; k >= k_{{ multi.interval[0].level }} + {{ multi.interval[0].offset }} + {{ multi.steps[0].extents[4] }}; --k) {
 {%- else %}
-    for (int k = k_min + 0; k <= k_max + 0; ++k) {
+    for (int k = k_{{ multi.interval[0].level }} + {{ multi.interval[0].offset }} + {{ multi.steps[0].extents[4] }}; k <= k_{{ multi.interval[1].level }} + {{ multi.interval[1].offset }} + {{ multi.steps[0].extents[5] }}; ++k) {
 {%- endif %}
 {%- for step in multi.steps %}
     {%- for region in step.regions %}
-      for (int i = i_min + 0; i <= i_max + 0; ++i) {
+      for (int i = i_min + {{ step.extents[0] }}; i <= i_max + {{ step.extents[1] }}; ++i) {
         #pragma omp simd
-        for (int j = j_min + 0; j <= j_max + 0; ++j) {
+        for (int j = j_min + {{ step.extents[2] }}; j <= j_max + {{ step.extents[3] }}; ++j) {
           {{ region.body }}
         }
       }
@@ -214,6 +227,13 @@ void run(const std::array<uint_t, ndim>& domain,
 {%- endfor %}
     }
 {% endfor %}
+
+{% if tmp_fields %}
+    // Free temporary storages
+{%- for field in tmp_fields %}
+    free_temp_store<{{ field.dtype }}>({{ field.name }});
+{%- endfor %}
+{% endif %}
 
 }  // run
 }  // namespace {{ stencil_unique_name }}

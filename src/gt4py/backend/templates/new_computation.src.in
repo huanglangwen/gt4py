@@ -69,13 +69,6 @@ static uint_t halo_sizes[] = { {{ halo_sizes[0] }}, {{ halo_sizes[1] }}, {{ halo
 static constexpr auto {{ name }} = {{ value }};
 {%- endfor %}
 
-{% if tmp_fields -%}
-// Placeholder definitions
-{%- for field in tmp_fields %}
-using p_{{ field.name }} = gt::tmp_arg<{{ loop.index0 }}, data_store_t<{{ field.dtype }}, 0>>;
-{%- endfor %}
-{%- endif %}
-
 //std::array<uint_t, ndim> get_min_origin(
 //    const std::initializer_list<const std::array<uint_t, ndim>>& origins) {
 //    std::array<uint_t, ndim> min_origin = *origins.begin();
@@ -118,7 +111,7 @@ template <typename DataType = float64_t> struct data_store_t {
 
 template<typename DataType>
 data_store_t<DataType> make_data_store(const BufferInfo& bi,
-                                       const std::array<uint_t, ndim>& compute_domain_shape,
+                                       const std::array<uint_t, ndim>& compute_domain,
                                        const std::array<uint_t, ndim>& origin) {
     // ptr, dims and strides are "outer domain" (i.e., compute domain + halo
     // region). The halo region is only defined through `make_grid` (and
@@ -129,8 +122,35 @@ data_store_t<DataType> make_data_store(const BufferInfo& bi,
     for (uint_t i = 0; i < ndim; ++i) {
         strides[i] = bi.strides[i] / sizeof(DataType);
         ptr += strides[i] * (origin[i] - halo_sizes[i]);
-        dims[i] = compute_domain_shape[i]+2*origin[i];
+        dims[i] = compute_domain[i]+2*origin[i];
     }
+    return data_store_t<DataType>{dims, strides, ptr};
+}
+
+template<typename DataType>
+data_store_t<DataType> make_temp_store(const std::array<uint_t, ndim>& compute_domain) {
+    // Compute dims
+    uint_t data_size = 1;
+    std::array<uint_t, ndim> dims{};
+    for(uint_t i = 0; i < ndim; ++i) {
+      dims[i] = halo_sizes[i] + compute_domain[i] + halo_sizes[i];
+      data_size *= dims[i];
+    }
+
+    // Compute strides and offset
+    uint_t offset = 0;
+    uint_t stride = 1;
+    std::array<uint_t, ndim> strides{};
+    for(int i = ndim - 1; i >= 0; --i) {
+      strides[i] = stride;
+      offset += stride * halo_sizes[i];
+      stride *= dims[i];
+    }
+
+    // Allocate pointer and shift by halo offset...
+    DataType* ptr = new DataType[data_size];
+    ptr += offset;
+
     return data_store_t<DataType>{dims, strides, ptr};
 }
 
@@ -158,6 +178,13 @@ void run(const std::array<uint_t, ndim>& domain,
 {%- for field in arg_fields %}
     auto {{ field.name }} = make_data_store<{{ field.dtype }}>(bi_{{ field.name }}, domain, {{ field.name }}_origin);
 {%- endfor %}
+
+{% if tmp_fields %}
+    // Allocate temporary storages
+{%- for field in tmp_fields %}
+    auto {{ field.name }} = make_temp_store<{{ field.dtype }}>(domain);
+{%- endfor %}
+{% endif %}
 
     int i_min = halo_sizes[0];
     int i_max = domain[0] + i_min - 1;

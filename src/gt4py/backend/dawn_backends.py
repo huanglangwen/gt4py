@@ -413,6 +413,56 @@ class BaseDawnBackend(gt_backend.BaseGTBackend):
         return pyext_sources
 
     @classmethod
+    def build_extension_module(
+            cls,
+            stencil_id: gt_definitions.StencilID,
+            pyext_sources: Dict[str, str],
+            pyext_build_opts: Dict[str, str],
+            *,
+            pyext_extra_include_dirs: List[str] = None,
+            uses_cuda: bool = False,
+    ):
+
+        # Build extension module
+        pyext_build_path = os.path.relpath(cls.get_pyext_build_path(stencil_id))
+        os.makedirs(pyext_build_path, exist_ok=True)
+        sources = []
+        for key, source in pyext_sources.items():
+            src_file_name = os.path.join(pyext_build_path, key)
+            src_ext = src_file_name.split(".")[-1]
+            if src_ext not in ["h", "hpp"]:
+                sources.append(src_file_name)
+
+            if source is not gt_utils.NOTHING:
+                with open(src_file_name, "w") as f:
+                    f.write(source)
+
+        pyext_target_path = cls.get_stencil_package_path(stencil_id)
+        qualified_pyext_name = cls.get_pyext_module_name(stencil_id, qualified=True)
+
+        if uses_cuda:
+            module_name, file_path = pyext_builder.build_gtcuda_ext(
+                qualified_pyext_name,
+                sources=sources,
+                build_path=pyext_build_path,
+                target_path=pyext_target_path,
+                extra_include_dirs=pyext_extra_include_dirs,
+                **pyext_build_opts,
+            )
+        else:
+            module_name, file_path = pyext_builder.build_gtcpu_ext(
+                qualified_pyext_name,
+                sources=sources,
+                build_path=pyext_build_path,
+                target_path=pyext_target_path,
+                extra_include_dirs=pyext_extra_include_dirs,
+                **pyext_build_opts,
+            )
+        assert module_name == qualified_pyext_name
+
+        return module_name, file_path
+
+    @classmethod
     def _generate_module(
         cls,
         stencil_id,

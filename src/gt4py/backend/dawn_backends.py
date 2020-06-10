@@ -25,6 +25,8 @@ import copy
 import jinja2
 import numpy as np
 
+from typing import List, Dict
+
 import dawn4py
 from dawn4py.serialization import SIR
 from dawn4py.serialization import utils as sir_utils
@@ -33,6 +35,7 @@ from gt4py import backend as gt_backend
 from gt4py import definitions as gt_definitions
 from gt4py import ir as gt_ir
 from gt4py import utils as gt_utils
+from . import pyext_builder
 
 DOMAIN_AXES = gt_definitions.CartesianSpace.names
 
@@ -271,7 +274,7 @@ class BaseDawnBackend(gt_backend.BaseGTBackend):
 
     GT_BACKEND_T = None
 
-    MODULE_GENERATOR_CLASS = gt_backend.GTPyModuleGenerator
+    GENERATOR_CLASS = gt_backend.GTPyModuleGenerator
 
     TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
     TEMPLATE_FILES = {
@@ -535,9 +538,11 @@ class BaseDawnBackend(gt_backend.BaseGTBackend):
 
             info["unreferenced"] = {}
 
-            generator = cls.MODULE_GENERATOR_CLASS(cls)
+            generator = cls.GENERATOR_CLASS(cls, options.as_dict())
+            kwargs["wrapper_info"] = info
+            import pdb; pdb.set_trace()
             module_source = generator(
-                stencil_id, definition_ir, options, wrapper_info=info, **kwargs
+                stencil_id, definition_ir, options, **kwargs
             )
 
             file_name = cls.get_stencil_module_path(stencil_id)
@@ -654,7 +659,7 @@ class DawnGTCUDABackend(BaseDawnBackend):
     DAWN_BACKEND_NS = "gt"
     DAWN_BACKEND_NAME = "GridTools"
     GT_BACKEND_T = "cuda"
-    MODULE_GENERATOR_CLASS = gt_backend.GTCUDAPyModuleGenerator
+    GENERATOR_CLASS = gt_backend.GTCUDAPyModuleGenerator
 
     name = "dawn:gtcuda"
     options = _DAWN_BACKEND_OPTIONS
@@ -709,7 +714,7 @@ class DawnCUDABackend(BaseDawnBackend):
     DAWN_BACKEND_NS = "cuda"
     DAWN_BACKEND_NAME = "CUDA"
     GT_BACKEND_T = "cuda"
-    MODULE_GENERATOR_CLASS = gt_backend.GTCUDAPyModuleGenerator
+    GENERATOR_CLASS = gt_backend.GTCUDAPyModuleGenerator
 
     name = "dawn:cuda"
     options = _DAWN_BACKEND_OPTIONS

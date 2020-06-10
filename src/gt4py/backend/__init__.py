@@ -22,4 +22,10 @@ from .base_gt_backend import *
 from .gt_cpu_backend import *
 from .gt_cuda_backend import *
 
+try:
+    import dawn4py
+    from .dawn_backends import *
+except ImportError:
+    pass  # dawn4py not installed
+
 from . import python_generator

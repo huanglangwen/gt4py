@@ -263,7 +263,7 @@ for name in dir(dawn4py.CodeGenOptions) + dir(dawn4py.OptimizerOptions):
 _DAWN_BACKEND_OPTIONS = {**_DAWN_BASE_OPTIONS, **_DAWN_TOOLCHAIN_OPTIONS}
 
 
-class BaseDawnBackend(gt_backend.BasePyExtBackend):
+class BaseDawnBackend(gt_backend.BaseBackend):
 
     DAWN_BACKEND_NS = None
     DAWN_BACKEND_NAME = None
@@ -271,7 +271,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
 
     GT_BACKEND_T = None
 
-    MODULE_GENERATOR_CLASS = gt_backend.PyExtModuleGenerator
+    MODULE_GENERATOR_CLASS = gt_backend.GTPyModuleGenerator
 
     TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
     TEMPLATE_FILES = {
@@ -659,7 +659,7 @@ class DawnCUDABackend(BaseDawnBackend):
     DAWN_BACKEND_NS = "cuda"
     DAWN_BACKEND_NAME = "CUDA"
     GT_BACKEND_T = "cuda"
-    MODULE_GENERATOR_CLASS = gt_backend.CUDAPyExtModuleGenerator
+    MODULE_GENERATOR_CLASS = gt_backend.GTCUDAPyModuleGenerator
 
     name = "dawn:cuda"
     options = _DAWN_BACKEND_OPTIONS

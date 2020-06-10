@@ -30,7 +30,7 @@ from gt4py import config as gt_config
 
 
 def clean_build_flags(config_vars):
-    for key, value in config_vars.items():
+    for key, value in distutils.sysconfig._config_vars.items():
         if type(value) == str:
             value = " " + value + " "
             for s in value.split(" "):
@@ -40,7 +40,7 @@ def clean_build_flags(config_vars):
                     or s.startswith("-g")
                 ):
                     value = value.replace(" " + s + " ", " ")
-            config_vars[key] = " ".join(value.split())
+            distutils.sysconfig._config_vars[key] = " ".join(value.split())
 
 
 def build_pybind_ext(
@@ -89,7 +89,6 @@ def build_pybind_ext(
             # "--parallel={}".format(gt_config.build_settings["parallel_jobs"]),
             "--build-temp={}".format(build_path),
             "--build-lib={}".format(build_path),
-            "--force",
         ],
     )
     if build_ext_class is not None:
@@ -258,7 +257,6 @@ def build_gtcuda_ext(
             *cxx_extra_compile_args_from_config,
         ],
         "nvcc": [
-            "-arch=sm_35",
             "-std=c++14",
             "-isystem={}".format(gt_config.build_settings["gt_include_path"]),
             "-isystem={}".format(gt_config.build_settings["boost_include_path"]),
@@ -277,7 +275,7 @@ def build_gtcuda_ext(
     extra_link_args = [*gt_config.build_settings["extra_link_args"]]
 
     if debug_mode:
-        debug_flags = ["-O0", "-g"]
+        debug_flags = ["-O0", "-ggdb"]
         extra_compile_args["cxx"].extend(debug_flags)
         extra_compile_args["nvcc"].extend(debug_flags)
         extra_link_args.extend(debug_flags)

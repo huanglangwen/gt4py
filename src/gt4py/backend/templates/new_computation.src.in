@@ -42,6 +42,7 @@
     - parameters: [{ "name": str, "dtype": str }]
     - stencil_unique_name: str
     - tmp_fields: [{ "name": str, "dtype": str }]
+    - block_sizes: [int]
     - max_threads: int
 #}
 
@@ -187,9 +188,9 @@ __global__ void __launch_bounds__({{ max_threads }}) {{ kernel_name }}(
     {{ perm_fields }}, {{ temp_fields }}, {{ parameters }}) {
 
     const int block_i_size =
-      (blockIdx.x + 1) * {{ block_size[0] }} < i_size ? {{ block_size[0] }} : i_size - blockIdx.x * {{ block_size[0] }};
+      (blockIdx.x + 1) * {{ block_sizes[0] }} < i_size ? {{ block_sizes[0] }} : i_size - blockIdx.x * {{ block_sizes[0] }};
     const int block_j_size =
-      (blockIdx.y + 1) * {{ block_size[1] }} < j_size ? {{ block_size[1] }} : j_size - blockIdx.y * {{ block_size[1] }};
+      (blockIdx.y + 1) * {{ block_sizes[1] }} < j_size ? {{ block_sizes[1] }} : j_size - blockIdx.y * {{ block_sizes[1] }};
 
     int i_block = 0 - 1;
     int j_block = 0 - 1;
@@ -199,11 +200,11 @@ __global__ void __launch_bounds__({{ max_threads }}) {{ kernel_name }}(
     }
     // initialized iterators
     int idx_i =
-      (blockIdx.x * {{ block_size[0] }} + i_block) * 1 + (blockIdx.y * {{ block_size[1] }} + j_block) * i_stride;
+      (blockIdx.x * {{ block_sizes[0] }} + i_block) * 1 + (blockIdx.y * {{ block_sizes[1] }} + j_block) * i_stride;
 
     idx_i += max(0, blockIdx.z * 4) * j_stride;
-    int k_min = max(0, blockIdx.z * {{ block_size[2] }});
-    int k_max = min(k_size - 1 + 0, (blockIdx.z + 1) * {{ block_size[2] }} - 1);
+    int k_min = max(0, blockIdx.z * {{ block_sizes[2] }});
+    int k_max = min(k_size - 1 + 0, (blockIdx.z + 1) * {{ block_sizes[2] }} - 1);
 
     for (int k = k_min + 0; k <= k_max + 0; ++k) {
       if (i_block >= 0 && i_block <= block_i_size - 1 + 0 && j_block >= 0 &&

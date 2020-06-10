@@ -116,6 +116,8 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
         arg_fields = []
         tmp_fields = []
         storage_ids = []
+        block_sizes = (32, 4, 4);
+
         max_ndim = 0
         for name, field_decl in node.fields.items():
             if name not in node.unreferenced:
@@ -173,6 +175,18 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
                 }
             )
 
+        # [0] = {dawn::iir::Extent}
+        #     minus_ = {int} -1
+        #     plus_ = {int}  0
+        # [1] = {dawn::iir::Extent}
+        #     minus_ = {int} -1
+        #     plus_ = {int} 0
+
+        max_extents = ((-1, 0), (-1, 0), (0, 0))
+        extra_thread_minus = 1 if max_extents[0][0] < 0 else 0
+        extra_thread_plus = 1 if max_extents[0][1] > 0 else 0
+        max_threads = block_sizes[0] * (block_sizes[1] + max_extents[1][1] - max_extents[1][0] + extra_thread_minus + extra_thread_plus)
+
         template_args = dict(
             arg_fields=arg_fields,
             constants=constants,
@@ -185,6 +199,8 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
             stencil_unique_name=self.class_name,
             tmp_fields=tmp_fields,
             max_ndim=max_ndim,
+            block_sizes=block_sizes,
+            max_threads=max_threads,
         )
 
         sources = {}

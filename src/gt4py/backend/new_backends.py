@@ -48,7 +48,7 @@ class _MaxKOffsetExtractor(gt_ir.IRNodeVisitor):
         self.max_offset = max(self.max_offset, abs(node.offset) + 1)
 
 
-class CXXOptExtGenerator(gt_backend.GTPyExtGenerator):
+class OptExtGenerator(gt_backend.GTPyExtGenerator):
     OP_TO_CPP = gt_backend.GTPyExtGenerator.OP_TO_CPP
     DATA_TYPE_TO_CPP = gt_backend.GTPyExtGenerator.DATA_TYPE_TO_CPP
 
@@ -67,7 +67,7 @@ class CXXOptExtGenerator(gt_backend.GTPyExtGenerator):
 
         iter_tuple = []
         for i in range(len(offset)):
-            iter = CXXOptExtGenerator.ITERATORS[i]
+            iter = OptExtGenerator.ITERATORS[i]
             if offset[i] != 0:
                 oper = ""
                 if offset[i] > 0:
@@ -176,7 +176,7 @@ class CXXOptExtGenerator(gt_backend.GTPyExtGenerator):
         template_args = dict(
             arg_fields=arg_fields,
             constants=constants,
-            gt_backend=self.gt_backend_t,
+            backend=self.gt_backend_t,
             halo_sizes=halo_sizes,
             k_axis=k_axis,
             module_name=self.module_name,
@@ -196,7 +196,7 @@ class CXXOptExtGenerator(gt_backend.GTPyExtGenerator):
 
 @gt_backend.register
 class CXXOptBackend(gt_backend.BaseGTBackend):
-    PYEXT_GENERATOR_CLASS = CXXOptExtGenerator
+    PYEXT_GENERATOR_CLASS = OptExtGenerator
     GT_BACKEND_T = "x86"
 
     name = "cxxopt"
@@ -213,4 +213,23 @@ class CXXOptBackend(gt_backend.BaseGTBackend):
     def generate_extension(cls, stencil_id, definition_ir, options, **kwargs):
         return cls._generic_generate_extension(
             stencil_id, definition_ir, options, uses_cuda=False, **kwargs
+        )
+
+@gt_backend.register
+class CUDABackend(gt_backend.BaseGTBackend):
+    MODULE_GENERATOR_CLASS = gt_backend.CUDAPyExtModuleGenerator
+    #MODULE_GENERATOR_CLASS = gt_backend.GTCUDAPyModuleGenerator
+    PYEXT_GENERATOR_CLASS = OptExtGenerator
+
+    GT_BACKEND_T = "cuda"
+    MODULE_GENERATOR_CLASS = gt_backend.CUDAPyExtModuleGenerator
+
+    name = "cuda"
+    options = gt_backend.BaseGTBackend.GT_BACKEND_OPTS
+    storage_info = gt_backend.GTCUDABackend.storage_info
+
+    @classmethod
+    def generate_extension(cls, stencil_id, definition_ir, options, **kwargs):
+        return cls._generic_generate_extension(
+            stencil_id, definition_ir, options, uses_cuda=True, **kwargs
         )

@@ -25,6 +25,11 @@
 #include <cstdint>
 #include <vector>
 
+{%- if "cuda" in backend %}
+#include <cuda.h>
+#include <cuda_runtime.h>
+{%- endif %}
+
 #include <gridtools/common/defs.hpp>
 namespace gt = ::gridtools;
 

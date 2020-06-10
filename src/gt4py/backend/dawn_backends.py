@@ -263,7 +263,7 @@ for name in dir(dawn4py.CodeGenOptions) + dir(dawn4py.OptimizerOptions):
 _DAWN_BACKEND_OPTIONS = {**_DAWN_BASE_OPTIONS, **_DAWN_TOOLCHAIN_OPTIONS}
 
 
-class BaseDawnBackend(gt_backend.BaseBackend):
+class BaseDawnBackend(gt_backend.BaseGTBackend):
 
     DAWN_BACKEND_NS = None
     DAWN_BACKEND_NAME = None

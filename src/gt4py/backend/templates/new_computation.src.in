@@ -42,6 +42,7 @@
     - parameters: [{ "name": str, "dtype": str }]
     - stencil_unique_name: str
     - tmp_fields: [{ "name": str, "dtype": str }]
+    - max_threads: int
 #}
 
 #include "computation.hpp"
@@ -178,6 +179,65 @@ void free_temp_store(data_store_t<DataType>& temp) {
 
 }  // namespace
 
+{%- if "cuda" in backend %}
+    // TODO: Define kernels...
+{% for multi in multi_stages %}
+__global__ void __launch_bounds__({{ max_threads }}) {{ kernel_name }}(
+    const int i_size, const int j_size, const int k_size, const int i_stride, const int j_stride,
+    {{ perm_fields }}, {{ temp_fields }}, {{ parameters }}) {
+
+    const int block_i_size =
+      (blockIdx.x + 1) * {{ block_size[0] }} < i_size ? {{ block_size[0] }} : i_size - blockIdx.x * {{ block_size[0] }};
+    const int block_j_size =
+      (blockIdx.y + 1) * {{ block_size[1] }} < j_size ? {{ block_size[1] }} : j_size - blockIdx.y * {{ block_size[1] }};
+
+    int i_block = 0 - 1;
+    int j_block = 0 - 1;
+    if (threadIdx.y < +1) {
+      i_block = (int) threadIdx.x;
+      j_block = (int) threadIdx.y + 0;
+    }
+    // initialized iterators
+    int idx_i =
+      (blockIdx.x * {{ block_size[0] }} + i_block) * 1 + (blockIdx.y * {{ block_size[1] }} + j_block) * i_stride;
+
+    idx_i += max(0, blockIdx.z * 4) * j_stride;
+    int k_min = max(0, blockIdx.z * {{ block_size[2] }});
+    int k_max = min(k_size - 1 + 0, (blockIdx.z + 1) * {{ block_size[2] }} - 1);
+
+    for (int k = k_min + 0; k <= k_max + 0; ++k) {
+      if (i_block >= 0 && i_block <= block_i_size - 1 + 0 && j_block >= 0 &&
+          j_block <= block_j_size - 1 + 0) {
+      ke[idx_i] = ((0.5 * dt2) *
+                    ((__ldg(&(ua[idx_i])) * ke[idx_i]) +
+                     (__ldg(&(va[idx_i])) * __ldg(&(vort[idx_i])))));
+    }
+
+    idx_i += j_stride;
+  }
+
+//{%- if multi.exec == "parallel" %}
+//    #pragma omp parallel for schedule(runtime)
+//{%- endif %}
+// {%- if multi.exec == "backward" %}
+//    for (int k = k_{{ multi.interval[1].level }} + {{ multi.interval[1].offset }} + {{ multi.steps[0].extents[5] }}; k >= k_{{ multi.interval[0].level }} + {{ multi.interval[0].offset }} + {{ multi.steps[0].extents[4] }}; --k) {
+//{%- else %}
+//    for (int k = k_{{ multi.interval[0].level }} + {{ multi.interval[0].offset }} + {{ multi.steps[0].extents[4] }}; k <= k_{{ multi.interval[1].level }} + {{ multi.interval[1].offset }} + {{ multi.steps[0].extents[5] }}; ++k) {
+//{%- endif %}
+//{%- for step in multi.steps %}
+//    {%- for region in step.regions %}
+//      for (int i = i_min + {{ step.extents[0] }}; i <= i_max + {{ step.extents[1] }}; ++i) {
+//        #pragma omp simd
+//        for (int j = j_min + {{ step.extents[2] }}; j <= j_max + {{ step.extents[3] }}; ++j) {
+//          {{ region.body }}
+//        }
+//      }
+//    {%- endfor %}
+//{%- endfor %}
+    }
+{% endfor %}
+{%- endif %}
+
 // Run actual computation
 void run(const std::array<uint_t, ndim>& domain,
 {%- set comma = joiner(", ") %}
@@ -209,7 +269,9 @@ void run(const std::array<uint_t, ndim>& domain,
 {% endif %}
 
 {%- if "cuda" in backend %}
-    // TODO: Invoke kernel...
+    // TODO: Invoke kernels...
+    {% for multi in multi_stages %}
+    {% endfor %}
 {%- else %}
     int i_min = halo_sizes[0];
     int i_max = domain[0] + i_min - 1;

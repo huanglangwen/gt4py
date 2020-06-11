@@ -270,8 +270,6 @@ _DAWN_BACKEND_OPTIONS = {**_DAWN_BASE_OPTIONS, **_DAWN_TOOLCHAIN_OPTIONS}
 
 class DawnPyModuleGenerator(gt_backend.GTPyModuleGenerator):
 
-    DEFAULT_GTCACHE_SIZE = 2
-
     def __init__(self, backend_class, options):
         super().__init__(backend_class, options)
 
@@ -542,12 +540,6 @@ class BaseDawnBackend(gt_backend.BaseGTBackend):
             gt_pyext_sources = cls.generate_extension_sources(
                 stencil_id, definition_ir, options, cls.GT_BACKEND_T
             )
-            kwargs["halo_size"] = int(
-                re.search(
-                    r"#define GRIDTOOLS_DAWN_HALO_EXTENT ([0-9]+)", gt_pyext_sources[dawn_src_file]
-                )[1]
-            )
-
         else:
             # Pass NOTHING to the builder means try to reuse the source code files
             gt_pyext_sources = {key: gt_utils.NOTHING for key in cls.TEMPLATE_FILES.keys()}

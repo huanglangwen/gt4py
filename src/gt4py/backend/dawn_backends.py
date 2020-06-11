@@ -630,7 +630,6 @@ class DawnGTCUDABackend(BaseDawnBackend):
     DAWN_BACKEND_NS = "gt"
     DAWN_BACKEND_NAME = "GridTools"
     GT_BACKEND_T = "cuda"
-    #GENERATOR_CLASS = gt_backend.GTCUDAPyModuleGenerator
 
     name = "dawn:gtcuda"
     options = _DAWN_BACKEND_OPTIONS
@@ -667,7 +666,6 @@ class DawnCUDABackend(BaseDawnBackend):
     DAWN_BACKEND_NS = "cuda"
     DAWN_BACKEND_NAME = "CUDA"
     GT_BACKEND_T = "cuda"
-    #GENERATOR_CLASS = gt_backend.GTCUDAPyModuleGenerator
 
     name = "dawn:cuda"
     options = _DAWN_BACKEND_OPTIONS
@@ -678,3 +676,4 @@ class DawnCUDABackend(BaseDawnBackend):
         return cls._generic_generate_extension(
             stencil_id, definition_ir, options, uses_cuda=True, **kwargs
         )
+

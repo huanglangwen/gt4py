@@ -14,6 +14,7 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+import math
 import numpy as np
 
 try:
@@ -167,6 +168,36 @@ class Storage(np.ndarray):
     @property
     def layout_map(self):
         return gt_backend.from_name(self.backend).storage_info["layout_map"](self.mask)
+
+    def scale(self, factor=1):
+        assert(factor >= 1)
+        data = self.data
+        if factor == 1:
+            new_shape = self.shape
+            new_data = np.copy(data)
+        else:
+            int_factor = int(math.ceil(factor))
+            new_shape = []
+            new_size = 1
+            for dim in self.shape:
+                new_dim = dim * int_factor
+                new_shape.append(new_dim)
+                new_size *= new_dim
+
+            flat_data = data.flatten()
+            interp_data = np.zeros(new_size, dtype=self.dtype)
+
+            # Interpolate...
+            for i in range(len(flat_data) - 1):
+                diff = flat_data[i + 1] - flat_data[i]
+                for k in range(int_factor):
+                    interp_data[i + k] = flat_data[i] + (float(k) * diff)
+            new_data = interp_data.reshape(new_shape)
+
+        res = from_array(
+            data=new_data, backend=self.backend, default_origin=self.default_origin, shape=new_shape,
+        )
+        return res
 
     def transpose(self, *axes):
         res = super().transpose(*axes)

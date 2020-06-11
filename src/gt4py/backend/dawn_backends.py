@@ -15,6 +15,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 import abc
+import enum
 import inspect
 import numbers
 import os
@@ -74,12 +75,19 @@ class FieldDeclCollector(gt_ir.IRNodeVisitor):
 
 
 class SIRConverter(gt_ir.IRNodeVisitor):
+    OP_TO_CPP = gt_backend.GTPyExtGenerator.OP_TO_CPP
+
     @classmethod
     def apply(cls, definition_ir):
         return cls()(definition_ir)
 
     def __call__(self, definition_ir):
         return self.visit(definition_ir)
+
+    def _convert_operator(self, op: enum.Enum):
+        if op in self.OP_TO_CPP:
+            return self.OP_TO_CPP[op]
+        return op.python_symbol
 
     def _make_global_variables(self, parameters: list, externals: dict):
         global_variables = SIR.GlobalVariableMap()
@@ -134,14 +142,14 @@ class SIRConverter(gt_ir.IRNodeVisitor):
         return sir_utils.make_field_access_expr(name=node.name, offset=offset)
 
     def visit_UnaryOpExpr(self, node: gt_ir.UnaryOpExpr, **kwargs):
-        op = node.op.python_symbol
+        op = self._convert_operator(node.op)
         operand = self.visit(node.arg)
         return sir_utils.make_unary_operator(op, operand)
 
     def visit_BinOpExpr(self, node: gt_ir.BinOpExpr, **kwargs):
         left = self.visit(node.lhs)
         right = self.visit(node.rhs)
-        op = node.op.python_symbol
+        op = self._convert_operator(node.op)
         if op == "**":
             return self.visit_ExpOpExpr(left, right)
         return sir_utils.make_binary_operator(left, op, right)

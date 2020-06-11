@@ -178,7 +178,7 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
         template_args = dict(
             arg_fields=arg_fields,
             constants=constants,
-            backend=self.gt_backend_t,
+            backend=self.backend,
             halo_sizes=halo_sizes,
             k_axis=k_axis,
             module_name=self.module_name,
@@ -199,7 +199,7 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
 
     def _compute_max_threads(self, block_sizes: tuple, max_extent: gt_definitions.Extent):
         max_threads = 0
-        if "cuda" in self.gt_backend_t:
+        if "cuda" in self.backend:
             max_extents = tuple(max_extent)
             extra_thread_minus = 1 if max_extents[0][0] < 0 else 0
             extra_thread_plus = 1 if max_extents[0][1] > 0 else 0
@@ -214,42 +214,21 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
 
 
 @gt_backend.register
-class CXXOptBackend(gt_backend.BaseGTBackend):
+class CXXOptBackend(gt_backend.GTCPUBackend):
     PYEXT_GENERATOR_CLASS = OptExtGenerator
     GT_BACKEND_T = "x86"
+    _CPU_ARCHITECTURE = GT_BACKEND_T
 
     name = "cxxopt"
     options = gt_backend.BaseGTBackend.GT_BACKEND_OPTS
-    storage_info = {
-        "alignment": 1,
-        "device": "cpu",
-        "layout_map": gt_backend.make_x86_layout_map,
-        "is_compatible_layout": gt_backend.x86_is_compatible_layout,
-        "is_compatible_type": gt_backend.gtcpu_is_compatible_type,
-    }
-
-    @classmethod
-    def generate_extension(cls, stencil_id, definition_ir, options, **kwargs):
-        return cls._generic_generate_extension(
-            stencil_id, definition_ir, options, uses_cuda=False, **kwargs
-        )
+    storage_info = gt_backend.GTX86Backend.storage_info
 
 
 @gt_backend.register
-class CUDABackend(gt_backend.BaseGTBackend):
-    MODULE_GENERATOR_CLASS = gt_backend.CUDAPyExtModuleGenerator
-    # MODULE_GENERATOR_CLASS = gt_backend.GTCUDAPyModuleGenerator
+class CUDABackend(gt_backend.GTCUDABackend):
     PYEXT_GENERATOR_CLASS = OptExtGenerator
-
     GT_BACKEND_T = "cuda"
-    MODULE_GENERATOR_CLASS = gt_backend.CUDAPyExtModuleGenerator
 
     name = "cuda"
     options = gt_backend.BaseGTBackend.GT_BACKEND_OPTS
     storage_info = gt_backend.GTCUDABackend.storage_info
-
-    @classmethod
-    def generate_extension(cls, stencil_id, definition_ir, options, **kwargs):
-        return cls._generic_generate_extension(
-            stencil_id, definition_ir, options, uses_cuda=True, **kwargs
-        )

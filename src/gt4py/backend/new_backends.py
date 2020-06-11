@@ -116,7 +116,7 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
         arg_fields = []
         tmp_fields = []
         storage_ids = []
-        block_sizes = (32, 4, 4);
+        block_sizes = (32, 4, 4)
 
         max_ndim = 0
         for name, field_decl in node.fields.items():
@@ -175,18 +175,6 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
                 }
             )
 
-        # [0] = {dawn::iir::Extent}
-        #     minus_ = {int} -1
-        #     plus_ = {int}  0
-        # [1] = {dawn::iir::Extent}
-        #     minus_ = {int} -1
-        #     plus_ = {int} 0
-
-        max_extents = ((-1, 0), (-1, 0), (0, 0))
-        extra_thread_minus = 1 if max_extents[0][0] < 0 else 0
-        extra_thread_plus = 1 if max_extents[0][1] > 0 else 0
-        max_threads = block_sizes[0] * (block_sizes[1] + max_extents[1][1] - max_extents[1][0] + extra_thread_minus + extra_thread_plus)
-
         template_args = dict(
             arg_fields=arg_fields,
             constants=constants,
@@ -200,7 +188,7 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
             tmp_fields=tmp_fields,
             max_ndim=max_ndim,
             block_sizes=block_sizes,
-            max_threads=max_threads,
+            max_threads=self._compute_max_threads(block_sizes, max_extent),
         )
 
         sources = {}
@@ -208,6 +196,21 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
             sources[key] = template.render(**template_args)
 
         return sources
+
+    def _compute_max_threads(self, block_sizes: tuple, max_extent: gt_definitions.Extent):
+        max_threads = 0
+        if "cuda" in self.gt_backend_t:
+            max_extents = tuple(max_extent)
+            extra_thread_minus = 1 if max_extents[0][0] < 0 else 0
+            extra_thread_plus = 1 if max_extents[0][1] > 0 else 0
+            max_threads = block_sizes[0] * (
+                    block_sizes[1]
+                    + max_extents[1][1]
+                    - max_extents[1][0]
+                    + extra_thread_minus
+                    + extra_thread_plus
+            )
+        return max_threads
 
 
 @gt_backend.register
@@ -231,10 +234,11 @@ class CXXOptBackend(gt_backend.BaseGTBackend):
             stencil_id, definition_ir, options, uses_cuda=False, **kwargs
         )
 
+
 @gt_backend.register
 class CUDABackend(gt_backend.BaseGTBackend):
     MODULE_GENERATOR_CLASS = gt_backend.CUDAPyExtModuleGenerator
-    #MODULE_GENERATOR_CLASS = gt_backend.GTCUDAPyModuleGenerator
+    # MODULE_GENERATOR_CLASS = gt_backend.GTCUDAPyModuleGenerator
     PYEXT_GENERATOR_CLASS = OptExtGenerator
 
     GT_BACKEND_T = "cuda"

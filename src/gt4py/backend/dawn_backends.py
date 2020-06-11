@@ -281,28 +281,29 @@ class DawnPyModuleGenerator(gt_backend.GTPyModuleGenerator):
         )
 
         args = []
-        none_args = {}
+        empty_checks = []
+        none_checks = []
+
         for arg in self.implementation_ir.api_signature:
             args.append(arg.name)
             if arg.name in self.implementation_ir.fields:
                 if arg.name in self.implementation_ir.unreferenced:
                     ndims = len(self.implementation_ir.fields[arg.name].axes)
-                    args.append("[{}]".format(", ".join(["0"] * ndims)))
+                    zeros = ", ".join(["0"] * ndims)
+                    args.append("[{}]".format(zeros))
+                    empty_checks.append(f"{arg.name} = np.empty(({zeros})) if {arg.name} is None else {arg.name}")
                 else:
                     args.append("list(_origin_['{}'])".format(arg.name))
             elif arg.name in self.implementation_ir.parameters and arg.default == None:
-                none_args[arg.name] = self.implementation_ir.parameters[arg.name].data_type
-
-        # Add None checks
-        none_checks = []
-        for arg in none_args:
-            none_checks.append(f"{arg} = 0 if {arg} is None else {arg}")
+                none_checks.append(f"{arg.name} = 0 if {arg.name} is None else {arg.name}")
 
         source = """
 # Load or generate a Dawn Computation object for the current domain size
+{empty_checks}
 {none_checks}
 pyext_module.run_computation(list(_domain_), {run_args}, exec_info)
 """.format(
+            empty_checks="\n".join(empty_checks),
             none_checks="\n".join(none_checks),
             run_args=", ".join(args)
         )

@@ -1,12 +1,11 @@
-import abc
 import sys
+import abc
 import time
 import warnings
+import numpy as np
 import io
 import os
 import jinja2
-import numpy as np
-
 import gt4py.backend as gt_backend
 import gt4py.storage as gt_storage
 from gt4py.definitions import (
@@ -49,11 +48,11 @@ class StencilObject(abc.ABC):
     def __str__(self):
         result = """
 <StencilObject: {name}> [backend="{backend}"]
-    - I/O fields: {fields} 
-    - Parameters: {params} 
-    - Constants: {constants} 
+    - I/O fields: {fields}
+    - Parameters: {params}
+    - Constants: {constants}
     - Definition ({func}):
-{source} 
+{source}
         """.format(
             name=self.options["module"] + "." + self.options["name"],
             version=self._gt_id_,
@@ -248,7 +247,7 @@ class StencilObject(abc.ABC):
         # Domain
         max_domain = Shape([sys.maxsize] * self.domain_info.ndims)
         for name, shape in shapes.items():
-            upper_boundary = Index(upper_boundaries[name])
+            upper_boundary = Index(self.field_info[name].boundary.upper_indices)
             max_domain &= shape - (Index(origin[name]) + upper_boundary)
 
         if domain is None:
@@ -273,14 +272,15 @@ class StencilObject(abc.ABC):
                     f"Origin for field {name} too small. Must be at least {min_origin}, is {origin[name]}"
                 )
             min_shape = tuple(
-                o + d + h for o, d, h in zip(origin[name], domain, upper_boundaries[name])
+                o + d + h
+                for o, d, h in zip(
+                    origin[name], domain, self.field_info[name].boundary.upper_indices
+                )
             )
             if min_shape > field.shape:
                 raise ValueError(
                     f"Shape of field {name} is {field.shape} but must be at least {min_shape} for given domain and origin."
                 )
-
-        stencil_name = self.options["module"] + "." + self.options["name"]
 
         debug_mode = "debug_mode" in self.options and self.options["debug_mode"]
         if debug_mode:

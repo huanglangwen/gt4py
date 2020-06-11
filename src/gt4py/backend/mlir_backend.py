@@ -14,15 +14,14 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-import sys
 import abc
+import enum
 import inspect
 import numbers
 import os
 import re
+import sys
 import types
-
-import enum
 import jinja2
 import numpy as np
 import subprocess as sub
@@ -56,16 +55,6 @@ class Intent(enum.Enum):
     IN = 0
     OUT = 1
     INOUT = 2
-
-
-def _is_relational(op: gt_ir.BinaryOperator):
-    return "<" in op.python_symbol or ">" in op.python_symbol or "=" in op.python_symbol
-
-
-def _binary_to_ternary(bin_op_expr: gt_ir.BinOpExpr):
-    zero = gt_ir.ScalarLiteral(value=0.0, data_type=gt_ir.DataType.FLOAT64)
-    one = gt_ir.ScalarLiteral(value=1.0, data_type=gt_ir.DataType.FLOAT64)
-    return gt_ir.TernaryOpExpr(condition=bin_op_expr, then_expr=one, else_expr=zero)
 
 
 class FieldInfoCollector(gt_ir.IRNodeVisitor):
@@ -111,6 +100,8 @@ class FieldInfoCollector(gt_ir.IRNodeVisitor):
 
 
 class MLIRConverter(gt_ir.IRNodeVisitor):
+    OP_TO_CPP = gt_backend.GTPyExtGenerator.OP_TO_CPP
+
     @classmethod
     def apply(cls, definition_ir: gt_ir.StencilDefinition, fields: OrderedDict):
         return cls()(definition_ir, fields)
@@ -261,6 +252,19 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
 
         return operation
 
+    def _is_relational(self, op: gt_ir.BinaryOperator):
+        return "<" in op.python_symbol or ">" in op.python_symbol or "=" in op.python_symbol
+
+    def _binary_to_ternary(self, bin_op_expr: gt_ir.BinOpExpr):
+        zero = gt_ir.ScalarLiteral(value=0.0, data_type=gt_ir.DataType.FLOAT64)
+        one = gt_ir.ScalarLiteral(value=1.0, data_type=gt_ir.DataType.FLOAT64)
+        return gt_ir.TernaryOpExpr(condition=bin_op_expr, then_expr=one, else_expr=zero)
+
+    def _convert_operator(self, op: enum.Enum):
+        if op in self.OP_TO_CPP:
+            return self.OP_TO_CPP[op]
+        return op.python_symbol
+
     def _make_global_variables(self, parameters: list, externals: dict):
         global_variables = self.global_variables_
         for param in parameters:
@@ -332,7 +336,7 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         return field_access_expr
 
     def visit_UnaryOpExpr(self, node: gt_ir.UnaryOpExpr, **kwargs):
-        op = node.op.python_symbol
+        op = self._convert_operator(node.op)
         operand = self.visit(node.arg)
         if op == "+":
             rhs = self.stack_[-1]
@@ -353,13 +357,14 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
             return unary_op_expr
 
     def visit_BinOpExpr(self, node: gt_ir.BinOpExpr, **kwargs):
-        op = node.op.python_symbol
-        if op == "**":
+        if node.op.python_symbol == "**":
             if node.rhs.value == 2:
                 op = "*"
                 node.rhs = node.lhs
             else:
                 raise NotImplementedError(f"Unsupported exponent value '{right.value}'")
+        else:
+            op = self._convert_operator(node.op)
 
         left = self.visit(node.lhs)
         right = self.visit(node.rhs)
@@ -426,9 +431,9 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         self.reset()
 
         value_node = node.value
-        if isinstance(value_node, gt_ir.BinOpExpr) and _is_relational(value_node.op):
+        if isinstance(value_node, gt_ir.BinOpExpr) and self._is_relational(value_node.op):
             # Convert this BinOpExpr into a TernaryOpExpr...
-            value_node = _binary_to_ternary(value_node)
+            value_node = self._binary_to_ternary(value_node)
 
         left = self.visit(node.target)
         right = self.visit(value_node)
@@ -609,7 +614,7 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
 
 
 @gt_backend.register
-class MLIRBackend(gt_backend.BasePyExtBackend):
+class MLIRBackend(gt_backend.BaseGTBackend):
 
     MLIR_BACKEND_NS = "mlir"
     MLIR_BACKEND_NAME = "mlir"
@@ -621,7 +626,8 @@ class MLIRBackend(gt_backend.BasePyExtBackend):
     }
 
     GT_BACKEND_T = "x86"
-    MODULE_GENERATOR_CLASS = gt_backend.PyExtModuleGenerator
+    GENERATOR_CLASS = gt_backend.GTPyModuleGenerator
+    PYEXT_GENERATOR_CLASS = gt_backend.GTPyExtGenerator
 
     TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
     TEMPLATE_FILES = {
@@ -901,7 +907,7 @@ class MLIRBackend(gt_backend.BasePyExtBackend):
 
             info["unreferenced"] = {}
 
-            generator = cls.MODULE_GENERATOR_CLASS(cls)
+            generator = cls.GENERATOR_CLASS(cls)
             module_source = generator(
                 stencil_id, definition_ir, options, wrapper_info=info, **kwargs
             )

@@ -25,16 +25,18 @@ import copy
 import jinja2
 import numpy as np
 
-from typing import List, Dict
+from typing import List, Dict, Type
 
 import dawn4py
 from dawn4py.serialization import SIR
 from dawn4py.serialization import utils as sir_utils
 
+from gt4py import analysis as gt_analysis
 from gt4py import backend as gt_backend
 from gt4py import definitions as gt_definitions
 from gt4py import ir as gt_ir
 from gt4py import utils as gt_utils
+from gt4py.utils import text as gt_text
 from . import pyext_builder
 
 DOMAIN_AXES = gt_definitions.CartesianSpace.names
@@ -266,6 +268,56 @@ for name in dir(dawn4py.CodeGenOptions) + dir(dawn4py.OptimizerOptions):
 _DAWN_BACKEND_OPTIONS = {**_DAWN_BASE_OPTIONS, **_DAWN_TOOLCHAIN_OPTIONS}
 
 
+class DawnPyModuleGenerator(gt_backend.GTPyModuleGenerator):
+
+    DEFAULT_GTCACHE_SIZE = 2
+
+    def __init__(self, backend_class, options):
+        super().__init__(backend_class, options)
+
+    def generate_implementation(self):
+        sources = gt_text.TextBlock(
+            indent_size=gt_backend.BaseModuleGenerator.TEMPLATE_INDENT_SIZE
+        )
+
+        args = []
+        none_args = {}
+        for arg in self.implementation_ir.api_signature:
+            args.append(arg.name)
+            if arg.name in self.implementation_ir.fields:
+                if arg.name in self.implementation_ir.unreferenced:
+                    ndims = len(self.implementation_ir.fields[arg.name].axes)
+                    args.append("[{}]".format(", ".join(["0"] * ndims)))
+                else:
+                    args.append("list(_origin_['{}'])".format(arg.name))
+            elif arg.name in self.implementation_ir.parameters and arg.default == None:
+                none_args[arg.name] = self.implementation_ir.parameters[arg.name].data_type
+
+        # Add None checks
+        none_checks = []
+        for arg in none_args:
+            none_checks.append(f"{arg} = 0 if {arg} is None else {arg}")
+
+        source = """
+# Load or generate a Dawn Computation object for the current domain size
+{none_checks}
+pyext_module.run_computation(list(_domain_), {run_args}, exec_info)
+""".format(
+            none_checks="\n".join(none_checks),
+            run_args=", ".join(args)
+        )
+        if self.backend_name.endswith("cuda"):
+            source = (
+                source
+                + """import cupy
+cupy.cuda.Device(0).synchronize()
+"""
+            )
+        sources.extend(source.splitlines())
+
+        return sources.text
+
+
 class BaseDawnBackend(gt_backend.BaseGTBackend):
 
     DAWN_BACKEND_NS = None
@@ -274,7 +326,9 @@ class BaseDawnBackend(gt_backend.BaseGTBackend):
 
     GT_BACKEND_T = None
 
-    GENERATOR_CLASS = gt_backend.GTPyModuleGenerator
+    GENERATOR_CLASS = DawnPyModuleGenerator
+
+    PYEXT_GENERATOR_CLASS = gt_backend.GTPyExtGenerator
 
     TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
     TEMPLATE_FILES = {
@@ -300,8 +354,8 @@ class BaseDawnBackend(gt_backend.BaseGTBackend):
         definition_ir: gt_ir.StencilDefinition,
         definition_func: types.FunctionType,
         options: gt_definitions.BuildOptions,
+        **kwargs,
     ):
-        # TODO: move this import to the top and find a better way to avoid circular imports
         from gt4py import gt_src_manager
 
         cls._check_options(options)
@@ -309,21 +363,15 @@ class BaseDawnBackend(gt_backend.BaseGTBackend):
         # Generate the Python binary extension (checking if GridTools sources are installed)
         if not gt_src_manager.has_gt_sources() and not gt_src_manager.install_gt_sources():
             raise RuntimeError("Missing GridTools sources.")
-        module_kwargs = {"implementation_ir": None}
         pyext_module_name, pyext_file_path = cls.generate_extension(
-            stencil_id, definition_ir, options, module_kwargs=module_kwargs
+            stencil_id, definition_ir, options, **kwargs
         )
 
         # Generate and return the Python wrapper class
+        extra_cache_info = {"pyext_module_name": pyext_module_name, "pyext_file_path": pyext_file_path}
+
         return cls._generate_module(
-            stencil_id,
-            definition_ir,
-            definition_func,
-            options,
-            extra_cache_info={"pyext_file_path": pyext_file_path},
-            pyext_module_name=pyext_module_name,
-            pyext_file_path=pyext_file_path,
-            **module_kwargs,
+            stencil_id, definition_ir, definition_func, options, extra_cache_info, **kwargs
         )
 
     @classmethod
@@ -424,6 +472,7 @@ class BaseDawnBackend(gt_backend.BaseGTBackend):
             *,
             pyext_extra_include_dirs: List[str] = None,
             uses_cuda: bool = False,
+            **kwargs,
     ):
 
         # Build extension module
@@ -467,98 +516,24 @@ class BaseDawnBackend(gt_backend.BaseGTBackend):
 
     @classmethod
     def _generate_module(
-        cls,
-        stencil_id,
-        definition_ir,
-        definition_func,
-        options,
-        *,
-        extra_cache_info=None,
-        **kwargs,
+            cls, stencil_id, definition_ir, definition_func, options, extra_cache_info, **kwargs
     ):
         if options.dev_opts.get("code-generation", True):
-            # Dawn backends do not use the internal analysis pipeline, so a custom
-            # wrapper_info object should be passed to the module generator
-            assert "implementation_ir" in kwargs
-            info = {}
-            if definition_ir.sources is not None:
-                info["sources"].update(
-                    {
-                        key: gt_utils.text.format_source(value, line_length=100)
-                        for key, value in definition_ir.sources
-                    }
-                )
-            else:
-                info["sources"] = {}
+            implementation_ir = kwargs["implementation_ir"] if "implementation_ir" in kwargs else None
+            if implementation_ir is None:
+                implementation_ir = gt_analysis.transform(definition_ir, options)
 
-            parallel_axes = definition_ir.domain.parallel_axes or []
-            sequential_axis = definition_ir.domain.sequential_axis.name
-            domain_info = gt_definitions.DomainInfo(
-                parallel_axes=tuple(ax.name for ax in parallel_axes),
-                sequential_axis=sequential_axis,
-                ndims=len(parallel_axes) + (1 if sequential_axis else 0),
-            )
-            info["domain_info"] = repr(domain_info)
+        generator_options = options.as_dict()
+        generator_options.update(extra_cache_info)
 
-            info["field_info"] = field_info = {}
-            info["parameter_info"] = parameter_info = {}
-
-            fields = {item.name: item for item in definition_ir.api_fields}
-            parameters = {item.name: item for item in definition_ir.parameters}
-
-            halo_size = kwargs.pop("halo_size") if "halo_size" in kwargs else 0
-            boundary = gt_definitions.Boundary(
-                ([(halo_size, halo_size)] * len(domain_info.parallel_axes)) + [(0, 0)]
-            )
-
-            for arg in definition_ir.api_signature:
-                if arg.name in fields:
-                    field_info[arg.name] = gt_definitions.FieldInfo(
-                        access=gt_definitions.AccessKind.READ_WRITE,
-                        dtype=fields[arg.name].data_type.dtype,
-                        boundary=boundary,
-                    )
-                else:
-                    parameter_info[arg.name] = gt_definitions.ParameterInfo(
-                        dtype=parameters[arg.name].data_type.dtype
-                    )
-
-            if definition_ir.externals:
-                info["gt_constants"] = {
-                    name: repr(value)
-                    for name, value in definition_ir.externals.items()
-                    if isinstance(value, numbers.Number)
-                }
-            else:
-                info["gt_constants"] = {}
-
-            info["gt_options"] = {
-                key: value for key, value in options.as_dict().items() if key not in ["build_info"]
-            }
-
-            info["unreferenced"] = {}
-
-            generator = cls.GENERATOR_CLASS(cls, options.as_dict())
-            kwargs["wrapper_info"] = info
-            import pdb; pdb.set_trace()
-            module_source = generator(
-                stencil_id, definition_ir, options, **kwargs
-            )
-
-            file_name = cls.get_stencil_module_path(stencil_id)
-            os.makedirs(os.path.dirname(file_name), exist_ok=True)
-            with open(file_name, "w") as f:
-                f.write(module_source)
-            extra_cache_info = extra_cache_info or {}
-            cls.update_cache(stencil_id, extra_cache_info)
-
-        return cls._load(stencil_id, definition_func)
+        return super(BaseDawnBackend, cls)._generate_module(
+            stencil_id, implementation_ir, definition_func, generator_options, extra_cache_info
+        )
 
     @classmethod
     def _generic_generate_extension(
         cls, stencil_id, definition_ir, options, *, uses_cuda=False, **kwargs
     ):
-        module_kwargs = kwargs["module_kwargs"]
         dawn_src_file = f"_dawn_{stencil_id.qualified_name.split('.')[-1]}.hpp"
 
         # Generate source
@@ -566,7 +541,7 @@ class BaseDawnBackend(gt_backend.BaseGTBackend):
             gt_pyext_sources = cls.generate_extension_sources(
                 stencil_id, definition_ir, options, cls.GT_BACKEND_T
             )
-            module_kwargs["halo_size"] = int(
+            kwargs["halo_size"] = int(
                 re.search(
                     r"#define GRIDTOOLS_DAWN_HALO_EXTENT ([0-9]+)", gt_pyext_sources[dawn_src_file]
                 )[1]
@@ -603,17 +578,12 @@ class BaseDawnBackend(gt_backend.BaseGTBackend):
             pyext_opts,
             pyext_extra_include_dirs=include_dirs,
             uses_cuda=uses_cuda,
+            **kwargs,
         )
 
     @classmethod
     @abc.abstractmethod
-    def generate_extension(
-        cls,
-        stencil_id: gt_definitions.StencilID,
-        definition_ir: gt_ir.StencilDefinition,
-        options: gt_definitions.BuildOptions,
-        **kwargs,
-    ):
+    def generate_extension(cls, stencil_id, definition_ir, options, **kwargs):
         pass
 
 
@@ -659,7 +629,7 @@ class DawnGTCUDABackend(BaseDawnBackend):
     DAWN_BACKEND_NS = "gt"
     DAWN_BACKEND_NAME = "GridTools"
     GT_BACKEND_T = "cuda"
-    GENERATOR_CLASS = gt_backend.GTCUDAPyModuleGenerator
+    #GENERATOR_CLASS = gt_backend.GTCUDAPyModuleGenerator
 
     name = "dawn:gtcuda"
     options = _DAWN_BACKEND_OPTIONS
@@ -714,7 +684,7 @@ class DawnCUDABackend(BaseDawnBackend):
     DAWN_BACKEND_NS = "cuda"
     DAWN_BACKEND_NAME = "CUDA"
     GT_BACKEND_T = "cuda"
-    GENERATOR_CLASS = gt_backend.GTCUDAPyModuleGenerator
+    #GENERATOR_CLASS = gt_backend.GTCUDAPyModuleGenerator
 
     name = "dawn:cuda"
     options = _DAWN_BACKEND_OPTIONS

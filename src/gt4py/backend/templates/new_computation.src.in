@@ -1,0 +1,315 @@
+{#
+
+ # GT4Py - GridTools4Py - GridTools for Python
+ #
+ # Copyright (c) 2014-2019, ETH Zurich
+ # All rights reserved.
+ #
+ # This file is part the GT4Py project and the GridTools framework.
+ # GT4Py is free software: you can redistribute it and/or modify it under
+ # the terms of the GNU General Public License as published by the
+ # Free Software Foundation, either version 3 of the License, or any later
+ # version. See the LICENSE.txt file at the top-level directory of this
+ # distribution for a copy of the license or check <https://www.gnu.org/licenses/>.
+ #
+ # SPDX-License-Identifier: GPL-3.0-or-later
+
+ ---- Template variables ----
+
+    - arg_fields: [{ "name": str, "dtype": str, "layout_id": int }]
+    - constants: { name:str : str }
+    - backend: str
+    - halo_sizes: [int]
+    - k_axis: { "n_intervals": int, "offset_limit": int}
+    - max_ndim: int
+    - multi_stages: [{ "exec": str, "interval": [{ "level": str, "offset": int }], "steps": [{
+            "args": [
+                {
+                    "name": str
+                    "access_type": str
+                    "extent": [int] | None
+                }
+            ],
+            "regions": [
+                {
+                    "interval_start": (level:int, offset:int),
+                    "interval_end": (level:int, offset:int),
+                    "body": str
+                }
+            ],
+            "extents": [int]
+        }]}]
+    - parameters: [{ "name": str, "dtype": str }]
+    - stencil_unique_name: str
+    - tmp_fields: [{ "name": str, "dtype": str }]
+    - block_sizes: [int]
+    - max_threads: int
+#}
+
+#include "computation.hpp"
+
+#include <array>
+#include <cassert>
+#include <stdexcept>
+
+namespace {{ stencil_unique_name }} {
+
+namespace {
+
+// Axis
+static constexpr uint_t level_offset_limit = {{ k_axis.offset_limit }};
+static constexpr uint_t k_axis_n_intervals = {{ k_axis.n_intervals }};
+
+static constexpr uint_t ndim = {{ max_ndim }};
+
+// These halo sizes are used to determine the sizes of the temporaries
+static const uint_t halo_sizes[] = { {{ halo_sizes[0] }}, {{ halo_sizes[1] }}, {{ halo_sizes[2] }} };
+{% if tmp_fields -%}
+static int temp_offset = -1;
+{%- endif %}
+
+{% if constants -%}
+// Constants
+{%- endif %}
+{% for name, value in constants.items() %}
+static constexpr auto {{ name }} = {{ value }};
+{%- endfor %}
+
+//std::array<uint_t, ndim> get_min_origin(
+//    const std::initializer_list<const std::array<uint_t, ndim>>& origins) {
+//    std::array<uint_t, ndim> min_origin = *origins.begin();
+//    for(const auto& origin : origins) {
+//        for(uint_t i = 0; i < ndim; ++i) {
+//            if(origin[i] < min_origin[i])
+//                min_origin[i] = origin[i];
+//        }
+//    }
+//    for(uint_t i = 0; i < ndim; ++i) {
+//        if(halo_sizes[i] < min_origin[i])
+//          halo_sizes[i] = min_origin[i];
+//    }
+//    return min_origin;
+//}
+
+template <typename DataType = float64_t> struct data_store_t {
+    std::array<uint_t, ndim> shape;
+    std::array<uint_t, ndim> strides;
+    DataType* ptr;
+
+    const DataType* data() const noexcept { return ptr; }
+
+    DataType* data() noexcept { return ptr; }
+
+    inline int index(int i, int j, int k) const {
+      return int(i * strides[0]) + int(j * strides[1]) + int(k * strides[2]);
+    }
+
+    // read-operator
+    const DataType& operator()(int i, int j = 0, int k = 0) const {
+      return ptr[index(i, j, k)];
+    }
+
+    // write-operator
+    DataType& operator()(int i, int j = 0, int k = 0) {
+      return ptr[index(i, j, k)];
+    }
+};
+
+template<typename DataType>
+data_store_t<DataType> make_data_store(const BufferInfo& bi,
+                                       const std::array<uint_t, ndim>& compute_domain,
+                                       const std::array<uint_t, ndim>& origin) {
+    // ptr, dims and strides are "outer domain" (i.e., compute domain + halo
+    // region). The halo region is only defined through `make_grid` (and
+    // currently, in the storage info)
+    std::array<uint_t, ndim> dims{};
+    std::array<uint_t, ndim> strides{};
+    DataType* ptr = static_cast<DataType*>(bi.ptr);
+    for (uint_t i = 0; i < ndim; ++i) {
+        strides[i] = bi.strides[i] / sizeof(DataType);
+        ptr += strides[i] * (origin[i] - halo_sizes[i]);
+        dims[i] = compute_domain[i]+2*origin[i];
+    }
+    return data_store_t<DataType>{dims, strides, ptr};
+}
+
+{% if tmp_fields -%}
+template<typename DataType>
+data_store_t<DataType> make_temp_store(const std::array<uint_t, ndim>& compute_domain) {
+    // Compute dims
+    uint_t data_size = 1;
+    std::array<uint_t, ndim> dims{};
+    for(uint_t i = 0; i < ndim; ++i) {
+      dims[i] = halo_sizes[i] + compute_domain[i] + halo_sizes[i];
+      data_size *= dims[i];
+    }
+
+    // Compute strides and offset
+    uint_t offset = 0;
+    uint_t stride = 1;
+    std::array<uint_t, ndim> strides{};
+    for(int i = ndim - 1; i >= 0; --i) {
+      strides[i] = stride;
+      offset += stride * halo_sizes[i];
+      stride *= dims[i];
+    }
+
+    // Allocate pointer and shift by halo offset...
+{%- if "cuda" in backend %}
+    DataType* ptr;
+    cudaMalloc((void**) &ptr, data_size * sizeof(DataType));
+{%- else %}
+    DataType* ptr = new DataType[data_size];
+{%- endif %}
+    ptr += offset;
+    temp_offset = offset;
+
+    return data_store_t<DataType>{dims, strides, ptr};
+}
+
+template<typename DataType>
+void free_temp_store(data_store_t<DataType>& temp) {
+    temp.ptr -= temp_offset;
+{%- if "cuda" in backend %}
+    cudaFree(temp.ptr);
+{%- else %}
+    delete[] temp.ptr;
+{%- endif %}
+}
+{%- endif %}
+
+}  // namespace
+
+{%- if "cuda" in backend %}
+    // TODO: Define kernels...
+{% for multi in multi_stages %}
+__global__ void __launch_bounds__({{ max_threads }}) {{ kernel_name }}(
+    const int i_size, const int j_size, const int k_size, const int i_stride, const int j_stride,
+    {{ perm_fields }}, {{ temp_fields }}, {{ parameters }}) {
+
+    const int block_i_size =
+      (blockIdx.x + 1) * {{ block_sizes[0] }} < i_size ? {{ block_sizes[0] }} : i_size - blockIdx.x * {{ block_sizes[0] }};
+    const int block_j_size =
+      (blockIdx.y + 1) * {{ block_sizes[1] }} < j_size ? {{ block_sizes[1] }} : j_size - blockIdx.y * {{ block_sizes[1] }};
+
+    int i_block = 0 - 1;
+    int j_block = 0 - 1;
+    if (threadIdx.y < +1) {
+      i_block = (int) threadIdx.x;
+      j_block = (int) threadIdx.y + 0;
+    }
+    // initialized iterators
+    int idx_i =
+      (blockIdx.x * {{ block_sizes[0] }} + i_block) * 1 + (blockIdx.y * {{ block_sizes[1] }} + j_block) * i_stride;
+
+    idx_i += max(0, blockIdx.z * 4) * j_stride;
+    int k_min = max(0, blockIdx.z * {{ block_sizes[2] }});
+    int k_max = min(k_size - 1 + 0, (blockIdx.z + 1) * {{ block_sizes[2] }} - 1);
+
+    for (int k = k_min + 0; k <= k_max + 0; ++k) {
+      if (i_block >= 0 && i_block <= block_i_size - 1 + 0 && j_block >= 0 &&
+          j_block <= block_j_size - 1 + 0) {
+      ke[idx_i] = ((0.5 * dt2) *
+                    ((__ldg(&(ua[idx_i])) * ke[idx_i]) +
+                     (__ldg(&(va[idx_i])) * __ldg(&(vort[idx_i])))));
+    }
+
+    idx_i += j_stride;
+  }
+
+//{%- if multi.exec == "parallel" %}
+//    #pragma omp parallel for schedule(runtime)
+//{%- endif %}
+// {%- if multi.exec == "backward" %}
+//    for (int k = k_{{ multi.interval[1].level }} + {{ multi.interval[1].offset }} + {{ multi.steps[0].extents[5] }}; k >= k_{{ multi.interval[0].level }} + {{ multi.interval[0].offset }} + {{ multi.steps[0].extents[4] }}; --k) {
+//{%- else %}
+//    for (int k = k_{{ multi.interval[0].level }} + {{ multi.interval[0].offset }} + {{ multi.steps[0].extents[4] }}; k <= k_{{ multi.interval[1].level }} + {{ multi.interval[1].offset }} + {{ multi.steps[0].extents[5] }}; ++k) {
+//{%- endif %}
+//{%- for step in multi.steps %}
+//    {%- for region in step.regions %}
+//      for (int i = i_min + {{ step.extents[0] }}; i <= i_max + {{ step.extents[1] }}; ++i) {
+//        #pragma omp simd
+//        for (int j = j_min + {{ step.extents[2] }}; j <= j_max + {{ step.extents[3] }}; ++j) {
+//          {{ region.body }}
+//        }
+//      }
+//    {%- endfor %}
+//{%- endfor %}
+    }
+{% endfor %}
+{%- endif %}
+
+// Run actual computation
+void run(const std::array<uint_t, ndim>& domain,
+{%- set comma = joiner(", ") %}
+{%- for field in arg_fields -%}
+         {{- comma() }}
+         const BufferInfo& bi_{{ field.name }} {{- comma() -}} const std::array<uint_t, ndim>& {{ field.name }}_origin
+{%- endfor %}
+{%- for param in parameters %}
+         {{- comma() }}
+         {{ param.dtype }} {{ param.name }}
+{%- endfor %}) {
+    /* Compute min origin
+    std::array<uint_t, ndim> min_origin = get_min_origin({
+{%- for field in arg_fields -%}
+         {{ field.name }}_origin {{ comma() if not loop.last }}
+{%- endfor -%}
+    });
+    */
+    // Initialize data stores from input buffers
+{%- for field in arg_fields %}
+    auto {{ field.name }} = make_data_store<{{ field.dtype }}>(bi_{{ field.name }}, domain, {{ field.name }}_origin);
+{%- endfor %}
+
+{% if tmp_fields %}
+    // Allocate temporary storages
+{%- for field in tmp_fields %}
+    auto {{ field.name }} = make_temp_store<{{ field.dtype }}>(domain);
+{%- endfor %}
+{% endif %}
+
+{%- if "cuda" in backend %}
+    // TODO: Invoke kernels...
+    {% for multi in multi_stages %}
+    {% endfor %}
+{%- else %}
+    int i_min = halo_sizes[0];
+    int i_max = domain[0] + i_min - 1;
+    int j_min = halo_sizes[1];
+    int j_max = domain[1] + j_min - 1;
+    int k_min = halo_sizes[2];
+    int k_max = domain[2] + k_min - 1;
+
+{% for multi in multi_stages %}
+{%- if multi.exec == "parallel" %}
+    #pragma omp parallel for schedule(runtime)
+{%- endif %}
+{%- if multi.exec == "backward" %}
+    for (int k = k_{{ multi.interval[1].level }} + {{ multi.interval[1].offset }} + {{ multi.steps[0].extents[5] }}; k >= k_{{ multi.interval[0].level }} + {{ multi.interval[0].offset }} + {{ multi.steps[0].extents[4] }}; --k) {
+{%- else %}
+    for (int k = k_{{ multi.interval[0].level }} + {{ multi.interval[0].offset }} + {{ multi.steps[0].extents[4] }}; k <= k_{{ multi.interval[1].level }} + {{ multi.interval[1].offset }} + {{ multi.steps[0].extents[5] }}; ++k) {
+{%- endif %}
+{%- for step in multi.steps %}
+    {%- for region in step.regions %}
+      for (int i = i_min + {{ step.extents[0] }}; i <= i_max + {{ step.extents[1] }}; ++i) {
+        #pragma omp simd
+        for (int j = j_min + {{ step.extents[2] }}; j <= j_max + {{ step.extents[3] }}; ++j) {
+          {{ region.body }}
+        }
+      }
+    {%- endfor %}
+{%- endfor %}
+    }
+{% endfor %}
+{%- endif %}
+
+{% if tmp_fields %}
+    // Free temporary storages
+{%- for field in tmp_fields %}
+    free_temp_store<{{ field.dtype }}>({{ field.name }});
+{%- endfor %}
+{% endif %}
+
+}  // run
+}  // namespace {{ stencil_unique_name }}

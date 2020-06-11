@@ -1,0 +1,61 @@
+{#
+
+ # GT4Py - GridTools4Py - GridTools for Python
+ #
+ # Copyright (c) 2014-2019, ETH Zurich
+ # All rights reserved.
+ #
+ # This file is part the GT4Py project and the GridTools framework.
+ # GT4Py is free software: you can redistribute it and/or modify it under
+ # the terms of the GNU General Public License as published by the
+ # Free Software Foundation, either version 3 of the License, or any later
+ # version. See the LICENSE.txt file at the top-level directory of this
+ # distribution for a copy of the license or check <https://www.gnu.org/licenses/>.
+ #
+ # SPDX-License-Identifier: GPL-3.0-or-later
+
+ ---- Template variables ----
+
+    - arg_fields: [{ "name": str, "dtype": str, "layout_id": int }]
+    - parameters: [{ "name": str, "dtype": str }]
+    - stencil_unique_name: str
+#}
+
+#include <array>
+#include <cstdint>
+#include <vector>
+
+{%- if "cuda" in backend %}
+#include <cuda.h>
+#include <cuda_runtime.h>
+{%- endif %}
+
+#include <gridtools/common/defs.hpp>
+namespace gt = ::gridtools;
+
+using py_size_t = std::intptr_t;
+using uint_t = unsigned;
+using float32_t = float;
+using float64_t = double;
+
+struct BufferInfo {
+    py_size_t ndim;
+    std::vector<py_size_t> shape;
+    std::vector<py_size_t> strides;
+    void* ptr;
+};
+
+namespace {{ stencil_unique_name }} {
+
+void run(const std::array<uint_t, 3>& domain,
+{%- set comma = joiner(", ") %}
+{%- for field in arg_fields -%}
+         {{- comma() }}
+         const BufferInfo& bi_{{ field.name }} {{- comma() -}} const std::array<uint_t, 3>& {{ field.name }}_origin
+{%- endfor %}
+{%- for param in parameters %}
+         {{- comma() }}
+         {{ param.dtype }} {{ param.name }}
+{%- endfor %});
+
+}  // namespace {{ stencil_unique_name }}

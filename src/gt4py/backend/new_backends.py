@@ -57,9 +57,25 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
     TEMPLATE_FILES["computation.src"] = "new_computation.src.in"
 
     ITERATORS = ("i", "j", "k")
+    BLOCK_SIZES = (32, 4, 4)
 
     def __init__(self, class_name, module_name, gt_backend_t, options):
         super().__init__(class_name, module_name, gt_backend_t, options)
+
+    def _compute_max_threads(self, block_sizes: tuple, max_extent: gt_definitions.Extent):
+        max_threads = 0
+        extra_threads = 0
+        max_extents = []
+        for pair in tuple(max_extent):
+            max_extents.extend(list(pair))
+        if "cuda" in self.backend:
+            extra_thread_minus = 1 if max_extents[0] < 0 else 0
+            extra_thread_plus = 1 if max_extents[1] > 0 else 0
+            extra_threads = extra_thread_minus + extra_thread_plus
+            max_threads = block_sizes[0] * (
+                block_sizes[1] + max_extents[3] - max_extents[2] + extra_threads
+            )
+        return max_extents, max_threads, extra_threads
 
     def visit_FieldRef(self, node: gt_ir.FieldRef, **kwargs):
         assert node.name in self.apply_block_symbols
@@ -116,7 +132,7 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
         arg_fields = []
         tmp_fields = []
         storage_ids = []
-        block_sizes = (32, 4, 4)
+        block_sizes = self.BLOCK_SIZES
 
         max_ndim = 0
         for name, field_decl in node.fields.items():
@@ -169,11 +185,16 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
 
             multi_stages.append(
                 {
+                    "name": multi_stage.name,
                     "exec": str(multi_stage.iteration_order).lower(),
                     "interval": interval,
                     "steps": steps,
                 }
             )
+
+        max_extents, max_threads, extra_threads = self._compute_max_threads(
+            block_sizes, max_extent
+        )
 
         template_args = dict(
             arg_fields=arg_fields,
@@ -188,7 +209,10 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
             tmp_fields=tmp_fields,
             max_ndim=max_ndim,
             block_sizes=block_sizes,
-            max_threads=self._compute_max_threads(block_sizes, max_extent),
+            max_extents=max_extents,
+            max_threads=max_threads,
+            extra_threads=extra_threads,
+            do_k_parallel=True,
         )
 
         sources = {}
@@ -196,21 +220,6 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
             sources[key] = template.render(**template_args)
 
         return sources
-
-    def _compute_max_threads(self, block_sizes: tuple, max_extent: gt_definitions.Extent):
-        max_threads = 0
-        if "cuda" in self.backend:
-            max_extents = tuple(max_extent)
-            extra_thread_minus = 1 if max_extents[0][0] < 0 else 0
-            extra_thread_plus = 1 if max_extents[0][1] > 0 else 0
-            max_threads = block_sizes[0] * (
-                    block_sizes[1]
-                    + max_extents[1][1]
-                    - max_extents[1][0]
-                    + extra_thread_minus
-                    + extra_thread_plus
-            )
-        return max_threads
 
 
 @gt_backend.register

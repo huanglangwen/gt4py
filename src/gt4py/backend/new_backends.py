@@ -51,13 +51,14 @@ class _MaxKOffsetExtractor(gt_ir.IRNodeVisitor):
 class OptExtGenerator(gt_backend.GTPyExtGenerator):
     OP_TO_CPP = gt_backend.GTPyExtGenerator.OP_TO_CPP
     DATA_TYPE_TO_CPP = gt_backend.GTPyExtGenerator.DATA_TYPE_TO_CPP
+    MAX_LINE_LEN = 120
 
     TEMPLATE_FILES = copy.deepcopy(gt_backend.GTPyExtGenerator.TEMPLATE_FILES)
     TEMPLATE_FILES["computation.hpp"] = "new_computation.hpp.in"
     TEMPLATE_FILES["computation.src"] = "new_computation.src.in"
 
     ITERATORS = ("i", "j", "k")
-    BLOCK_SIZES = (32, 4, 4)
+    BLOCK_SIZES = (32, 1, 4)
 
     def __init__(self, class_name, module_name, gt_backend_t, options):
         super().__init__(class_name, module_name, gt_backend_t, options)
@@ -92,7 +93,7 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
             else:
                 iter_tuple.append(iter)
 
-        return "{name}({idx})".format(name=node.name, idx=", ".join(iter_tuple))
+        return "{name}({idx})".format(name=node.name, idx=",".join(iter_tuple))
 
     def visit_VarRef(self, node: gt_ir.VarRef, *, write_context=False):
         assert node.name in self.apply_block_symbols
@@ -180,6 +181,26 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
                         )
 
                     step = self.visit(stage)
+                    for region in step["regions"]:
+                        body = region["body"]
+                        max_len = self.MAX_LINE_LEN
+                        if len(body) > max_len:
+                            lines = []
+                            nlines = (len(body) // max_len) + 1
+                            last_pos = 0
+                            pos = -1
+
+                            for n in range(nlines):
+                                ndx = body.find(" ", pos + 1)
+                                while ndx >= 0 and ndx < max_len:
+                                    pos = ndx
+                                    ndx = body.find(" ", ndx + 1)
+                                if pos != last_pos:
+                                    lines.append(body[last_pos:pos])
+                                    last_pos = pos
+                            lines.append(body[last_pos + 1:])
+                            region["body"] = "\n".join(lines)
+
                     step["extents"] = extents
                     steps.append(step)
 

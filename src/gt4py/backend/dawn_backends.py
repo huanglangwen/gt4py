@@ -84,11 +84,6 @@ class SIRConverter(gt_ir.IRNodeVisitor):
     def __call__(self, definition_ir):
         return self.visit(definition_ir)
 
-    def _convert_operator(self, op: enum.Enum):
-        if op in self.OP_TO_CPP:
-            return self.OP_TO_CPP[op]
-        return op.python_symbol
-
     def _make_global_variables(self, parameters: list, externals: dict):
         global_variables = SIR.GlobalVariableMap()
 
@@ -107,6 +102,11 @@ class SIRConverter(gt_ir.IRNodeVisitor):
                 global_variables.map[param.name].double_value = param.init or 0.0
 
         return global_variables
+
+    def visit_Operator(self, op: enum.Enum):
+        if op in self.OP_TO_CPP:
+            return self.OP_TO_CPP[op]
+        return op.python_symbol
 
     def visit_BuiltinLiteral(self, node: gt_ir.BuiltinLiteral):
         if node.value == gt_ir.Builtin.TRUE:
@@ -142,17 +142,19 @@ class SIRConverter(gt_ir.IRNodeVisitor):
         return sir_utils.make_field_access_expr(name=node.name, offset=offset)
 
     def visit_UnaryOpExpr(self, node: gt_ir.UnaryOpExpr, **kwargs):
-        op = self._convert_operator(node.op)
+        op = self.visit_Operator(node.op)
         operand = self.visit(node.arg)
         return sir_utils.make_unary_operator(op, operand)
 
     def visit_BinOpExpr(self, node: gt_ir.BinOpExpr, **kwargs):
         left = self.visit(node.lhs)
         right = self.visit(node.rhs)
-        op = self._convert_operator(node.op)
-        if op == "**":
-            return self.visit_ExpOpExpr(left, right)
-        return sir_utils.make_binary_operator(left, op, right)
+        if node.op.python_symbol == "**":
+            sir = self.visit_ExpOpExpr(left, right)
+        else:
+            op = self.visit_Operator(node.op)
+            sir = sir_utils.make_binary_operator(left, op, right)
+        return sir
 
     def visit_ExpOpExpr(self, left, right):
         exponent = right.value

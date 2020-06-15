@@ -239,7 +239,7 @@ __global__ void __launch_bounds__({{ max_threads }}) {{ multi.name }}_kernel(
     for (int k = k_min + 0; k <= k_max + 0; ++k) {
     {%- for step in multi.steps %}
       {%- for region in step.regions %}
-      if(i_block >= {{ step.extents[0] }} && i <= i_block_size + {{ step.extents[1] }} &&
+      if(i_block >= {{ step.extents[0] }} && i_block <= i_block_size + {{ step.extents[1] }} &&
          j_block >= {{ step.extents[2] }} && j_block <= j_block_size + {{ step.extents[3] }}) {
           {{ region.body }}
       }

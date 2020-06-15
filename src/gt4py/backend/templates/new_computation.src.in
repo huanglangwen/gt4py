@@ -286,7 +286,7 @@ void run(const std::array<uint_t, ndim>& domain,
     {% for multi in multi_stages %}
     const unsigned int nx = domain[0] - halo_sizes[0] - halo_sizes[0];
     const unsigned int ny = domain[1] - halo_sizes[1] - halo_sizes[1];
-    const unsigned int ny = domain[2] - halo_sizes[2] - halo_sizes[2];
+    const unsigned int nz = domain[2] - halo_sizes[2] - halo_sizes[2];
     const unsigned int nbx = (nx + {{ block_sizes[0] }} - 1) / {{ block_sizes[0] }};
     const unsigned int nby = (ny + {{ block_sizes[1] }}  - 1) / {{ block_sizes[1] }};
 {%- if do_k_parallel %}

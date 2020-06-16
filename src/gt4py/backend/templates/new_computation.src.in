@@ -188,7 +188,8 @@ __global__ void __launch_bounds__({{ max_threads }}) {{ multi.name }}_kernel(
     {{ field.dtype }}* const {{ field.name }}
 {%- endfor -%}
 {% if tmp_fields -%}
-    const uint_t* temp_strides,
+    {{- comma() }}
+    const uint_t* temp_strides
 {%- for field in tmp_fields -%}
     {{- comma() }}
     {{ field.dtype }}* const {{ field.name }}

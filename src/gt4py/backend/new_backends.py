@@ -72,8 +72,8 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
         for pair in tuple(max_extent):
             max_extents.extend(list(pair))
         if "cuda" in self.backend:
-            extra_thread_minus = 1 if max_extents[0] < 0 else 0
-            extra_thread_plus = 1 if max_extents[1] > 0 else 0
+            extra_thread_minus = 0 #1 if max_extents[0] < 0 else 0
+            extra_thread_plus = 0 #1 if max_extents[1] > 0 else 0
             extra_threads = extra_thread_minus + extra_thread_plus
             max_threads = block_sizes[0] * (
                 block_sizes[1] + max_extents[3] - max_extents[2] + extra_threads

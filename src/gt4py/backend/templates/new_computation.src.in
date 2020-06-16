@@ -60,10 +60,10 @@ namespace {{ stencil_unique_name }} {
 
 namespace {
 
-// Axis
+{# // Axis
 static constexpr uint_t level_offset_limit = {{ k_axis.offset_limit }};
 static constexpr uint_t k_axis_n_intervals = {{ k_axis.n_intervals }};
-
+#}
 static constexpr uint_t ndim = {{ max_ndim }};
 
 // These halo sizes are used to determine the sizes of the temporaries
@@ -182,18 +182,18 @@ __global__ void __launch_bounds__({{ max_threads }}) {{ multi.name }}_kernel(
     const int j_min, const int j_max, const int j_size,
     const int k_min, const int k_max, const int k_size,
     const uint_t* data_strides,
-{% if tmp_fields -%}
-    const uint_t* temp_strides,
-{%- endif %}
 {%- set comma = joiner(", ") %}
 {%- for field in arg_fields -%}
     {{- comma() }}
     {{ field.dtype }}* const {{ field.name }}
 {%- endfor -%}
+{% if tmp_fields -%}
+    const uint_t* temp_strides,
 {%- for field in tmp_fields -%}
     {{- comma() }}
     {{ field.dtype }}* const {{ field.name }}
 {%- endfor -%}
+{%- endif %}
 {%- for param in parameters -%}
     {{- comma() }}
     const {{ param.dtype }} {{ param.name }}
@@ -299,8 +299,9 @@ void run(const std::array<uint_t, ndim>& domain,
     {{- comma() }}
     {{ field.name }}
 {%- endfor %}
+{{- comma() }}
 {%- if tmp_fields %}
-    temp_strides.data(),
+    temp_strides.data()
 {%- for field in tmp_fields %}
     {{- comma() }}
     {{ field.name }}

@@ -199,20 +199,20 @@ __global__ void __launch_bounds__({{ max_threads }}) {{ multi.name }}_kernel(
 {%- endfor -%}
 ) {
 
-    int data_idx = (blockIdx.x * {{ block_sizes[0] }} + i_block) * 1 + (blockIdx.y * {{ block_sizes[1] }} + j_block) * j_stride;
+    int i =  blockDim.x * blockIdx.x + threadIdx.x;
+    int j =  blockDim.y * blockIdx.y + threadIdx.y;
+    //int k =  blockDim.z * blockIdx.z + threadIdx.z;
+
+    int data_idx = (blockIdx.x * {{ block_sizes[0] }} + i) * 1 + (blockIdx.y * {{ block_sizes[1] }} + j) * j_stride;
 {% if tmp_fields -%}
     {# TODO Assuming temp max extents are the same as persistent, not always the case... #}
-    int tmp_idx = (i_block + {{ -max_extents[0] }}) * 1 + (j_block + {{ -max_extents[2] }}) * j_stride_tmp;
+    int tmp_idx = (i + {{ -max_extents[0] }}) * 1 + (j + {{ -max_extents[2] }}) * j_stride_tmp;
 {% endif -%}
 
     data_idx += max({{ k_interval_diff }}, blockIdx.z * {{ block_sizes[2] }}) * k_stride;
 {% if tmp_fields -%}
     idx_tmp += max({{ k_interval_diff }}, blockIdx.z * {{ block_sizes[2] }}) * k_stride_tmp;
 {% endif -%}
-
-    int i =  blockDim.x * blockIdx.x + threadIdx.x;
-    int j =  blockDim.y * blockIdx.y + threadIdx.y;
-    //int k =  blockDim.z * blockIdx.z + threadIdx.z;
 
     for (int k = k_min + 0; k <= k_max + 0; ++k) {
     {%- for step in multi.steps %}

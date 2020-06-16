@@ -262,6 +262,15 @@ void run(const std::array<uint_t, ndim>& domain,
     const auto temp_strides = {{ tmp_fields[0].name }}_ds.strides;
 {%- endif %}
 
+{%- for field in arg_fields %}
+    {{ field.dtype }}* {{ field.name }} = {{ field.name }}_ds.ptr;
+{%- endfor %}
+{% if tmp_fields -%}
+{%- for field in tmp_fields %}
+    {{ field.dtype }}* {{ field.name }} = {{ field.name }}_ds.ptr;
+{%- endfor -%}
+{%- endif -%}
+
 {# --- CUDA --- #}
 {%- if "cuda" in backend %}
     {% for multi in multi_stages %}
@@ -288,13 +297,13 @@ void run(const std::array<uint_t, ndim>& domain,
     {%- set extra_indent=4 %}
 {%- for field in arg_fields -%}
     {{- comma() }}
-    {{ field.name }}.ptr
+    {{ field.name }}
 {%- endfor %}
 {%- if tmp_fields %}
     temp_strides.data(),
 {%- for field in tmp_fields %}
     {{- comma() }}
-    {{ field.name }}.ptr
+    {{ field.name }}
 {%- endfor %}
 {%- endif %}
 {%- for param in parameters %}
@@ -305,16 +314,6 @@ void run(const std::array<uint_t, ndim>& domain,
     {% endfor %}
 {# --- C++ --- #}
 {%- else %}
-
-{%- for field in arg_fields %}
-    {{ field.dtype }}* {{ field.name }} = {{ field.name }}_ds.ptr;
-{%- endfor %}
-{% if tmp_fields -%}
-{%- for field in tmp_fields %}
-    {{ field.dtype }}* {{ field.name }} = {{ field.name }}_ds.ptr;
-{%- endfor %}
-{%- endif -%}
-
 {% for multi in multi_stages %}
 {%- if multi.exec == "parallel" %}
     #pragma omp parallel for schedule(runtime)

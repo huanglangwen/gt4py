@@ -239,7 +239,7 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
         template_args = dict(
             arg_fields=arg_fields,
             constants=constants,
-            backend=self.backend,
+            gt_backend=self.backend,
             halo_sizes=halo_sizes,
             k_axis=k_axis,
             module_name=self.module_name,

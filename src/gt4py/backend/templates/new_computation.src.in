@@ -18,7 +18,7 @@
 
     - arg_fields: [{ "name": str, "dtype": str, "layout_id": int }]
     - constants: { name:str : str }
-    - backend: str
+    - gt_backend: str
     - halo_sizes: [int]
     - k_axis: { "n_intervals": int, "offset_limit": int}
     - max_ndim: int
@@ -143,7 +143,7 @@ data_store_t<DataType> make_temp_store(const std::array<uint_t, ndim>& compute_d
     }
 
     // Allocate pointer and shift by halo offset...
-{%- if "cuda" in backend %}
+{%- if "cuda" in gt_backend %}
     DataType* ptr;
     cudaMalloc((void**) &ptr, data_size * sizeof(DataType));
 {%- else %}
@@ -158,7 +158,7 @@ data_store_t<DataType> make_temp_store(const std::array<uint_t, ndim>& compute_d
 template<typename DataType>
 void free_temp_store(data_store_t<DataType>& temp) {
     temp.ptr -= temp_offset;
-{%- if "cuda" in backend %}
+{%- if "cuda" in gt_backend %}
     cudaFree(temp.ptr);
 {%- else %}
     delete[] temp.ptr;
@@ -167,7 +167,7 @@ void free_temp_store(data_store_t<DataType>& temp) {
 {%- endif %}
 }  // namespace
 
-{% if "cuda" in backend -%}
+{% if "cuda" in gt_backend -%}
 {# NOTE i_stride == 1, e.g. strides = (1, 64, 3520)
 {% set jboundary_limit = block_sizes[1] + max_extents[3] - max_extents[2] %}
 {% set iminus_limit = jboundary_limit + (1 if max_extents[0] < 0 else 0) %}
@@ -273,7 +273,7 @@ void run(const std::array<uint_t, ndim>& domain,
 {%- endif -%}
 
 {# --- CUDA --- #}
-{%- if "cuda" in backend %}
+{%- if "cuda" in gt_backend %}
     {% for multi in multi_stages %}
     const unsigned int i_size = domain[0] - 2 * i_min;
     const unsigned int j_size = domain[1] - 2 * j_min;
@@ -300,8 +300,8 @@ void run(const std::array<uint_t, ndim>& domain,
     {{- comma() }}
     {{ field.name }}
 {%- endfor %}
-{{- comma() }}
 {%- if tmp_fields %}
+    {{- comma() }}
     temp_strides.data()
 {%- for field in tmp_fields %}
     {{- comma() }}

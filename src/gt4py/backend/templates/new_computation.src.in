@@ -83,7 +83,7 @@ template <typename DataType = float64_t> struct data_store_t {
     std::array<uint_t, ndim> shape;
     std::array<uint_t, ndim> strides;
     DataType* ptr;
-
+{#
     const DataType* data() const noexcept { return ptr; }
 
     DataType* data() noexcept { return ptr; }
@@ -101,6 +101,7 @@ template <typename DataType = float64_t> struct data_store_t {
     DataType& operator()(int i, int j = 0, int k = 0) {
       return ptr[index(i, j, k)];
     }
+#}
 };
 
 template<typename DataType>
@@ -176,6 +177,10 @@ void free_temp_store(data_store_t<DataType>& temp) {
 {% set k_interval_min = 0 %}
 {% set k_interval_diff = 0 %}
 {% set k_interval_offset = -1 %} #}
+__constant__ uint_t data_strides[{{ max_ndim }}];
+{% if tmp_fields -%}
+__constant__ uint_t temp_strides[{{ max_ndim }}];
+{%- endif %}
 {% for multi in multi_stages %}
 __global__ void __launch_bounds__({{ max_threads }}) {{ multi.name }}_kernel(
     const int i_min, const int i_max, const int i_size,
@@ -187,14 +192,10 @@ __global__ void __launch_bounds__({{ max_threads }}) {{ multi.name }}_kernel(
     {{- comma() }}
     {{ field.dtype }}* const {{ field.name }}
 {%- endfor -%}
-{% if tmp_fields -%}
-    {{- comma() }}
-    const uint_t* temp_strides
 {%- for field in tmp_fields -%}
     {{- comma() }}
     {{ field.dtype }}* const {{ field.name }}
 {%- endfor -%}
-{%- endif %}
 {%- for param in parameters -%}
     {{- comma() }}
     const {{ param.dtype }} {{ param.name }}
@@ -258,11 +259,6 @@ void run(const std::array<uint_t, ndim>& domain,
     const int k_min = halo_sizes[2];
     const int k_max = domain[2] + k_min - 1;
 
-    const auto data_strides = {{ arg_fields[0].name }}_ds.strides;
-{%- if tmp_fields %}
-    const auto temp_strides = {{ tmp_fields[0].name }}_ds.strides;
-{%- endif %}
-
 {%- for field in arg_fields %}
     {{ field.dtype }}* {{ field.name }} = {{ field.name }}_ds.ptr;
 {%- endfor %}
@@ -275,39 +271,39 @@ void run(const std::array<uint_t, ndim>& domain,
 {# --- CUDA --- #}
 {%- if "cuda" in gt_backend %}
     {% for multi in multi_stages %}
-    const unsigned int i_size = domain[0] - 2 * i_min;
-    const unsigned int j_size = domain[1] - 2 * j_min;
-    const unsigned int k_size = domain[2] - 2 * k_min;
-    const unsigned int i_block_size = (i_size + {{ block_sizes[0] }} - 1) / {{ block_sizes[0] }};
-    const unsigned int j_block_size = (j_size + {{ block_sizes[1] }}  - 1) / {{ block_sizes[1] }};
+    const uint_t int i_size = domain[0] - 2 * i_min;
+    const uint_t int j_size = domain[1] - 2 * j_min;
+    const uint_t int k_size = domain[2] - 2 * k_min;
+    const uint_t int i_block_size = (i_size + {{ block_sizes[0] }} - 1) / {{ block_sizes[0] }};
+    const uint_t int j_block_size = (j_size + {{ block_sizes[1] }}  - 1) / {{ block_sizes[1] }};
 {%- if do_k_parallel %}
-    const unsigned int k_block_size = (domain[2] + {{ block_sizes[2] }} - 1) / {{ block_sizes[2] }};
+    const uint_t int k_block_size = (domain[2] + {{ block_sizes[2] }} - 1) / {{ block_sizes[2] }};
 {%- else %}
-    const unsigned int k_block_size = 1;
+    const uint_t int k_block_size = 1;
 {%- endif %}
 
     dim3 gdim(i_block_size, j_block_size, k_block_size);
     dim3 bdim({{ block_sizes[0] }}, {{ block_sizes[1] }} + {{ extra_threads }}, 1);
 
+    cudaMemcpyToSymbol(data_strides, {{ arg_fields[0].name }}_ds.strides.data(), sizeof(uint_t) * ndim);
+{%- if tmp_fields %}
+    cudaMemcpyToSymbol(temp_strides, {{ tmp_fields[0].name }}_ds.strides.data(), sizeof(uint_t) * ndim);
+{%- endif %}
+
     {{ multi.name }}_kernel<<<gdim, bdim>>>(
     i_min, i_max, i_size,
     j_min, j_max, j_size,
     k_min, k_max, k_size,
-    data_strides.data(),
     {%- set comma = joiner(", ") %}
     {%- set extra_indent=4 %}
 {%- for field in arg_fields -%}
     {{- comma() }}
     {{ field.name }}
 {%- endfor %}
-{%- if tmp_fields %}
-    {{- comma() }}
-    temp_strides.data()
 {%- for field in tmp_fields %}
     {{- comma() }}
     {{ field.name }}
 {%- endfor %}
-{%- endif %}
 {%- for param in parameters %}
     {{- comma() }}
     {{ param.name }}
@@ -316,6 +312,10 @@ void run(const std::array<uint_t, ndim>& domain,
     {% endfor %}
 {# --- C++ --- #}
 {%- else %}
+    const auto data_strides = {{ arg_fields[0].name }}_ds.strides;
+{%- if tmp_fields %}
+    const auto temp_strides = {{ tmp_fields[0].name }}_ds.strides;
+{%- endif %}
 {% for multi in multi_stages %}
 {%- if multi.exec == "parallel" %}
     #pragma omp parallel for schedule(runtime)

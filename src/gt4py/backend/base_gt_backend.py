@@ -419,7 +419,7 @@ pyext_module.run_computation(list(_domain_), {run_args}, exec_info)
 """.format(
             run_args=", ".join(args)
         )
-        if self.backend_name == "gtcuda":
+        if self.backend_name.endswith("cuda"):
             source = (
                 source
                 + """import cupy

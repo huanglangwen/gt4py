@@ -177,7 +177,9 @@ void free_temp_store(data_store_t<DataType>& temp) {
 {% set k_interval_offset = -1 %}
 {% for multi in multi_stages %}
 __global__ void __launch_bounds__({{ max_threads }}) {{ multi.name }}_kernel(
-    const int i_size, const int j_size, const int k_size,
+    const int i_min, const int i_max, const int i_size,
+    const int j_min, const int j_max, const int j_size,
+    const int k_min, const int k_max, const int k_size,
     const int j_stride, const int k_stride,
 {% if tmp_fields -%}
     const int j_stride_tmp, const int k_stride_tmp,
@@ -196,32 +198,6 @@ __global__ void __launch_bounds__({{ max_threads }}) {{ multi.name }}_kernel(
     const {{ param.dtype }} {{ param.name }}
 {%- endfor -%}
 ) {
-    const int i_block_size = (blockIdx.x + 1) * {{ block_sizes[0] }} < i_size ? {{ block_sizes[0] }} : i_size - blockIdx.x * {{ block_sizes[0] }};
-    const int j_block_size = (blockIdx.y + 1) * {{ block_sizes[1] }} < j_size ? {{ block_sizes[1] }} : j_size - blockIdx.y * {{ block_sizes[1] }};
-
-    int i_block = {{ max_extents[0] }} - 1;
-    int j_block = {{ max_extents[2] }} - 1;
-
-    if (threadIdx.y < {{ jboundary_limit }}) {
-      i_block = (int) threadIdx.x;
-      j_block = (int) threadIdx.y + {{ max_extents[2] }};
-    }
-{%- if max_extents[0] < 0 -%}
-    else if(threadIdx.y < {{ iminus_limit }}) {
-{# set padded_boundary = 1 if abs(max_extents[0]) <= 1 else (2 if abs(max_extents[0]) <= 2 else (4 if abs(max_extents[0]) <= 4 else 8)) #}
-{% set padded_boundary = 1 %}
-        i_block = -{{ padded_boundary }} + (int) threadIdx.x % {{ padded_boundary }};
-        j_block = (int) threadIdx.x / {{ padded_boundary }} + {{ max_extents[2] }};
-    }
-{% endif -%}
-{% if max_extents[1] > 0 -%}
-    else if(threadIdx.y < {{ iplus_limit }}) {
-{# set padded_boundary = abs(1 if max_extents[1]) <= 1 else (2 if abs(max_extents[1]) <= 2 else (4 if abs(max_extents[1]) <= 4 else 8)) #}
-{% set padded_boundary = 1 %}
-        i_block = threadIdx.x % {{ padded_boundary }} + {{ block_sizes[0] }};
-        j_block = (int) threadIdx.x / {{ padded_boundary }} + {{ max_extents[2] }};
-    }
-{% endif -%}
 
     int data_idx = (blockIdx.x * {{ block_sizes[0] }} + i_block) * 1 + (blockIdx.y * {{ block_sizes[1] }} + j_block) * j_stride;
 {% if tmp_fields -%}
@@ -233,14 +209,16 @@ __global__ void __launch_bounds__({{ max_threads }}) {{ multi.name }}_kernel(
 {% if tmp_fields -%}
     idx_tmp += max({{ k_interval_diff }}, blockIdx.z * {{ block_sizes[2] }}) * k_stride_tmp;
 {% endif -%}
-    int k_min = max({{ k_interval_min }}, blockIdx.z * {{ block_sizes[2] }});
-    int k_max = min((k_size - 1) + {{ k_interval_offset }}, (blockIdx.z + 1) * {{ block_sizes[2] }} - 1);
+
+    int i =  blockDim.x * blockIdx.x + threadIdx.x;
+    int j =  blockDim.y * blockIdx.y + threadIdx.y;
+    //int k =  blockDim.z * blockIdx.z + threadIdx.z;
 
     for (int k = k_min + 0; k <= k_max + 0; ++k) {
     {%- for step in multi.steps %}
       {%- for region in step.regions %}
-      if(i_block >= {{ step.extents[0] }} && i_block <= i_block_size + {{ step.extents[1] }} &&
-         j_block >= {{ step.extents[2] }} && j_block <= j_block_size + {{ step.extents[3] }}) {
+          if(i >= i_min + {{ step.extents[0] }} && i <= i_max + {{ step.extents[1] }} &&
+             j >= j_min + {{ step.extents[2] }} && j <= j_max + {{ step.extents[3] }}) {
           {{ region.body }}
       }
     {%- endfor %}
@@ -281,24 +259,33 @@ void run(const std::array<uint_t, ndim>& domain,
 {%- endfor %}
 {%- endif -%}
 
+    const int i_min = halo_sizes[0];
+    const int i_max = domain[0] + i_min - 1;
+    const int j_min = halo_sizes[1];
+    const int j_max = domain[1] + j_min - 1;
+    const int k_min = halo_sizes[2];
+    const int k_max = domain[2] + k_min - 1;
+
 {# --- CUDA --- #}
 {%- if "cuda" in backend %}
     {% for multi in multi_stages %}
-    const unsigned int nx = domain[0] - halo_sizes[0] - halo_sizes[0];
-    const unsigned int ny = domain[1] - halo_sizes[1] - halo_sizes[1];
-    const unsigned int nz = domain[2] - halo_sizes[2] - halo_sizes[2];
-    const unsigned int nbx = (nx + {{ block_sizes[0] }} - 1) / {{ block_sizes[0] }};
-    const unsigned int nby = (ny + {{ block_sizes[1] }}  - 1) / {{ block_sizes[1] }};
+    const unsigned int i_size = domain[0] - 2 * i_min;
+    const unsigned int j_size = domain[1] - 2 * j_min;
+    const unsigned int k_size = domain[2] - 2 * k_min;
+    const unsigned int i_block_size = (i_size + {{ block_sizes[0] }} - 1) / {{ block_sizes[0] }};
+    const unsigned int j_block_size = (j_size + {{ block_sizes[1] }}  - 1) / {{ block_sizes[1] }};
 {%- if do_k_parallel %}
-    const unsigned int nbz = (domain[2] + {{ block_sizes[2] }} - 1) / {{ block_sizes[2] }};
+    const unsigned int k_block_size = (domain[2] + {{ block_sizes[2] }} - 1) / {{ block_sizes[2] }};
 {%- else %}
-    const unsigned int nbz = 1;
+    const unsigned int k_block_size = 1;
 {%- endif %}
 
-    dim3 blocks(nbx, nby, nbz);
-    dim3 threads({{ block_sizes[0] }}, {{ block_sizes[1] }} + {{ extra_threads }}, 1);
+    dim3 gdim(i_block_size, j_block_size, k_block_size);
+    dim3 bdim({{ block_sizes[0] }}, {{ block_sizes[1] }} + {{ extra_threads }}, 1);
 
-    {{ multi.name }}_kernel<<<blocks, threads>>>(nx, ny, nz,
+    {{ multi.name }}_kernel<<<gdim, bdim>>>(i_min, i_max, i_size,
+    j_min, j_max, j_size,
+    k_min, k_max, k_size,
     {{ arg_fields[0].name }}.strides[1], {{ arg_fields[0].name }}.strides[2],
     {%- set comma = joiner(", ") %}
     {%- set extra_indent=4 %}
@@ -321,13 +308,6 @@ void run(const std::array<uint_t, ndim>& domain,
     {% endfor %}
 {# --- C++ --- #}
 {%- else %}
-    int i_min = halo_sizes[0];
-    int i_max = domain[0] + i_min - 1;
-    int j_min = halo_sizes[1];
-    int j_max = domain[1] + j_min - 1;
-    int k_min = halo_sizes[2];
-    int k_max = domain[2] + k_min - 1;
-
 {% for multi in multi_stages %}
 {%- if multi.exec == "parallel" %}
     #pragma omp parallel for schedule(runtime)

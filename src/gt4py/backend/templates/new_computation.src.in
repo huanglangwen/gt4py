@@ -42,6 +42,7 @@
     - parameters: [{ "name": str, "dtype": str }]
     - stencil_unique_name: str
     - tmp_fields: [{ "name": str, "dtype": str }]
+    - access_vars: [{ "name": str, "expr": str, "itype": str }]
     - block_sizes: [int]
     - max_extents: [int]
     - max_threads: int
@@ -167,22 +168,22 @@ void free_temp_store(data_store_t<DataType>& temp) {
 }  // namespace
 
 {% if "cuda" in backend -%}
-{# NOTE i_stride == 1, e.g. strides = (1, 64, 3520) #}
+{# NOTE i_stride == 1, e.g. strides = (1, 64, 3520)
 {% set jboundary_limit = block_sizes[1] + max_extents[3] - max_extents[2] %}
 {% set iminus_limit = jboundary_limit + (1 if max_extents[0] < 0 else 0) %}
-{% set iplus_limit = iminus_limit + (1 if max_extents[1] > 0 else 0) %}
-{# TODO Actually compute these... #}
+{% set iplus_limit = iminus_limit + (1 if max_extents[1] > 0 else 0) %} #}
+{# TODO Actually compute these...
 {% set k_interval_min = 0 %}
 {% set k_interval_diff = 0 %}
-{% set k_interval_offset = -1 %}
+{% set k_interval_offset = -1 %} #}
 {% for multi in multi_stages %}
 __global__ void __launch_bounds__({{ max_threads }}) {{ multi.name }}_kernel(
     const int i_min, const int i_max, const int i_size,
     const int j_min, const int j_max, const int j_size,
     const int k_min, const int k_max, const int k_size,
-    const int j_stride, const int k_stride,
+    const uint_t* data_strides,
 {% if tmp_fields -%}
-    const int j_stride_tmp, const int k_stride_tmp,
+    const uint_t* temp_strides,
 {%- endif %}
 {%- set comma = joiner(", ") %}
 {%- for field in arg_fields -%}
@@ -199,26 +200,18 @@ __global__ void __launch_bounds__({{ max_threads }}) {{ multi.name }}_kernel(
 {%- endfor -%}
 ) {
 
-    int i =  blockDim.x * blockIdx.x + threadIdx.x;
-    int j =  blockDim.y * blockIdx.y + threadIdx.y;
-    //int k =  blockDim.z * blockIdx.z + threadIdx.z;
-
-    int data_idx = (blockIdx.x * {{ block_sizes[0] }} + i) * 1 + (blockIdx.y * {{ block_sizes[1] }} + j) * j_stride;
-{% if tmp_fields -%}
-    {# TODO Assuming temp max extents are the same as persistent, not always the case... #}
-    int tmp_idx = (i + {{ -max_extents[0] }}) * 1 + (j + {{ -max_extents[2] }}) * j_stride_tmp;
-{% endif -%}
-
-    data_idx += max({{ k_interval_diff }}, blockIdx.z * {{ block_sizes[2] }}) * k_stride;
-{% if tmp_fields -%}
-    idx_tmp += max({{ k_interval_diff }}, blockIdx.z * {{ block_sizes[2] }}) * k_stride_tmp;
-{% endif -%}
+    int i =  i_min + (blockDim.x * blockIdx.x + threadIdx.x);
+    int j =  j_min + (blockDim.y * blockIdx.y + threadIdx.y);
+    //int k =  k_min + (blockDim.z * blockIdx.z + threadIdx.z);
 
     for (int k = k_min + 0; k <= k_max + 0; ++k) {
     {%- for step in multi.steps %}
       {%- for region in step.regions %}
-          if(i >= i_min + {{ step.extents[0] }} && i <= i_max + {{ step.extents[1] }} &&
-             j >= j_min + {{ step.extents[2] }} && j <= j_max + {{ step.extents[3] }}) {
+          if(i >= {{ step.extents[0] }} && i <= i_max + {{ step.extents[1] }} &&
+             j >= {{ step.extents[2] }} && j <= j_max + {{ step.extents[3] }}) {
+          {%- for access in access_vars %}
+            {{ access.itype }} {{ access.name }} = {{ access.expr }};
+          {%- endfor %}
           {{ region.body }}
       }
     {%- endfor %}
@@ -226,11 +219,10 @@ __global__ void __launch_bounds__({{ max_threads }}) {{ multi.name }}_kernel(
     __syncthreads();
     {%- endif -%}
 {%- endfor %}
-
-    data_idx += k_stride;
+{#   data_idx += k_stride;
 {%- if tmp_fields %}
     tmp_idx += k_stride_tmp;
-{% endif -%}
+{% endif %}  #}
   }
 }
 {% endfor %}
@@ -249,22 +241,26 @@ void run(const std::array<uint_t, ndim>& domain,
 {%- endfor %}) {
     // Initialize data stores from input buffers
 {%- for field in arg_fields %}
-    auto {{ field.name }} = make_data_store<{{ field.dtype }}>(bi_{{ field.name }}, domain, {{ field.name }}_origin);
+    auto {{ field.name }}_ds = make_data_store<{{ field.dtype }}>(bi_{{ field.name }}, domain, {{ field.name }}_origin);
 {%- endfor %}
 
 {% if tmp_fields -%}
     // Allocate temporary storages
 {%- for field in tmp_fields %}
-    auto {{ field.name }} = make_temp_store<{{ field.dtype }}>(domain);
+    auto {{ field.name }}_ds = make_temp_store<{{ field.dtype }}>(domain);
 {%- endfor %}
-{%- endif -%}
-
+{%- endif %}
     const int i_min = halo_sizes[0];
     const int i_max = domain[0] + i_min - 1;
     const int j_min = halo_sizes[1];
     const int j_max = domain[1] + j_min - 1;
     const int k_min = halo_sizes[2];
     const int k_max = domain[2] + k_min - 1;
+
+    const auto data_strides = {{ arg_fields[0].name }}_ds.strides;
+{%- if tmp_fields %}
+    const auto temp_strides = {{ tmp_fields[0].name }}_ds.strides;
+{%- endif %}
 
 {# --- CUDA --- #}
 {%- if "cuda" in backend %}
@@ -283,10 +279,11 @@ void run(const std::array<uint_t, ndim>& domain,
     dim3 gdim(i_block_size, j_block_size, k_block_size);
     dim3 bdim({{ block_sizes[0] }}, {{ block_sizes[1] }} + {{ extra_threads }}, 1);
 
-    {{ multi.name }}_kernel<<<gdim, bdim>>>(i_min, i_max, i_size,
+    {{ multi.name }}_kernel<<<gdim, bdim>>>(
+    i_min, i_max, i_size,
     j_min, j_max, j_size,
     k_min, k_max, k_size,
-    {{ arg_fields[0].name }}.strides[1], {{ arg_fields[0].name }}.strides[2],
+    data_strides.data(),
     {%- set comma = joiner(", ") %}
     {%- set extra_indent=4 %}
 {%- for field in arg_fields -%}
@@ -294,7 +291,7 @@ void run(const std::array<uint_t, ndim>& domain,
     {{ field.name }}.ptr
 {%- endfor %}
 {%- if tmp_fields %}
-    {{ tmp_fields[0].name }}.strides[1], {{ tmp_fields[0].name }}.strides[2]
+    temp_strides.data(),
 {%- for field in tmp_fields %}
     {{- comma() }}
     {{ field.name }}.ptr
@@ -308,6 +305,16 @@ void run(const std::array<uint_t, ndim>& domain,
     {% endfor %}
 {# --- C++ --- #}
 {%- else %}
+
+{%- for field in arg_fields %}
+    {{ field.dtype }}* {{ field.name }} = {{ field.name }}_ds.ptr;
+{%- endfor %}
+{% if tmp_fields -%}
+{%- for field in tmp_fields %}
+    {{ field.dtype }}* {{ field.name }} = {{ field.name }}_ds.ptr;
+{%- endfor %}
+{%- endif -%}
+
 {% for multi in multi_stages %}
 {%- if multi.exec == "parallel" %}
     #pragma omp parallel for schedule(runtime)
@@ -322,6 +329,9 @@ void run(const std::array<uint_t, ndim>& domain,
       for (int i = i_min + {{ step.extents[0] }}; i <= i_max + {{ step.extents[1] }}; ++i) {
         #pragma omp simd
         for (int j = j_min + {{ step.extents[2] }}; j <= j_max + {{ step.extents[3] }}; ++j) {
+{%- for access in access_vars %}
+          {{ access.itype }} {{ access.name }} = {{ access.expr }};
+{%- endfor %}
           {{ region.body }}
         }
       }
@@ -334,7 +344,7 @@ void run(const std::array<uint_t, ndim>& domain,
 {%- if tmp_fields -%}
     // Free temporary storages
 {%- for field in tmp_fields %}
-    free_temp_store<{{ field.dtype }}>({{ field.name }});
+    free_temp_store<{{ field.dtype }}>({{ field.name }}_ds);
 {%- endfor %}
 {%- endif %}
 

@@ -58,10 +58,12 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
     TEMPLATE_FILES["computation.src"] = "new_computation.src.in"
 
     ITERATORS = ("i", "j", "k")
-    BLOCK_SIZES = (32, 1, 4)
+    BLOCK_SIZES = (256, 1, 1)
 
     def __init__(self, class_name, module_name, gt_backend_t, options):
         super().__init__(class_name, module_name, gt_backend_t, options)
+        self.access_map_ = dict()
+        self.tmp_fields_ = dict()
 
     def _compute_max_threads(self, block_sizes: tuple, max_extent: gt_definitions.Extent):
         max_threads = 0
@@ -78,6 +80,12 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
             )
         return max_extents, max_threads, extra_threads
 
+    def visit_BinOpExpr(self, node: gt_ir.BinOpExpr):
+        if node.op.python_symbol == "**" and node.rhs.value == 2:
+            node.op = gt_ir.BinaryOperator.MUL
+            node.rhs = node.lhs
+        return super().visit_BinOpExpr(node)
+
     def visit_FieldRef(self, node: gt_ir.FieldRef, **kwargs):
         assert node.name in self.apply_block_symbols
         offset = [node.offset.get(name, 0) for name in self.domain.axes_names]
@@ -93,7 +101,17 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
             else:
                 iter_tuple.append(iter)
 
-        return "{name}({idx})".format(name=node.name, idx=",".join(iter_tuple))
+        data_type = "temp" if node.name in self.tmp_fields_ else "data"
+        idx_key = data_type + "".join(iter_tuple)
+        if idx_key not in self.access_map_:
+            suffix = idx_key.replace(",", "").replace("+", "p").replace("-", "m")
+            idx_name = f"{data_type}_idx_{suffix}"
+            stride_name = f"{data_type}_strides"
+            strides = [f"(({iter_tuple[i]}) * {stride_name}[{i}])" for i in range(len(iter_tuple))]
+            idx_expr = " + ".join(strides)
+            self.access_map_[idx_key] = dict(name=idx_name, expr=idx_expr, itype="int")
+
+        return node.name + "[" + self.access_map_[idx_key]["name"] + "]"
 
     def visit_VarRef(self, node: gt_ir.VarRef, *, write_context=False):
         assert node.name in self.apply_block_symbols
@@ -150,6 +168,7 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
                     arg_fields.append(field_attributes)
                 else:
                     tmp_fields.append(field_attributes)
+                    self.tmp_fields_[name] = True
 
         parameters = [
             {"name": parameter.name, "dtype": self._make_cpp_type(parameter.data_type)}
@@ -229,11 +248,12 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
             stencil_unique_name=self.class_name,
             tmp_fields=tmp_fields,
             max_ndim=max_ndim,
+            access_vars=list(self.access_map_.values()),
             block_sizes=block_sizes,
             max_extents=max_extents,
             max_threads=max_threads,
             extra_threads=extra_threads,
-            do_k_parallel=True,
+            do_k_parallel=False,
         )
 
         sources = {}

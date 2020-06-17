@@ -254,6 +254,7 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
             max_threads=max_threads,
             extra_threads=extra_threads,
             do_k_parallel=False,
+            debug=True,
         )
 
         sources = {}

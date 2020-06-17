@@ -48,14 +48,14 @@
     - max_threads: int
     - extra_threads: int
     - do_k_parallel: bool
+    - debug: bool
 #}
 
 #include "computation.hpp"
-
-#include <array>
+{#
 #include <cassert>
 #include <stdexcept>
-
+#}
 namespace {{ stencil_unique_name }} {
 
 namespace {
@@ -200,7 +200,6 @@ __global__ void __launch_bounds__({{ max_threads }}) {{ multi.name }}_kernel(
     const {{ param.dtype }} {{ param.name }}
 {%- endfor -%}
 ) {
-
     int i =  i_min + (blockDim.x * blockIdx.x + threadIdx.x);
     int j =  j_min + (blockDim.y * blockIdx.y + threadIdx.y);
     //int k =  k_min + (blockDim.z * blockIdx.z + threadIdx.z);
@@ -257,7 +256,10 @@ void run(const std::array<uint_t, ndim>& domain,
     const int j_max = domain[1] + j_min - 1;
     const int k_min = halo_sizes[2];
     const int k_max = domain[2] + k_min - 1;
-
+{%- if debug %}
+    printf("DEBUG: origin = (%d,%d,%d)\n", {{ arg_fields[0].name }}_origin[0], {{ arg_fields[0].name }}_origin[1], {{ arg_fields[0].name }}_origin[2]);
+    printf("DEBUG: (i_min,i_max,j_min,j_max,k_min,k_max) = (%d,%d,%d,%d,%d,%d)\n", i_min, i_max, j_min, j_max, k_min, k_max);
+{%- endif %}
 {%- for field in arg_fields %}
     {{ field.dtype }}* {{ field.name }} = {{ field.name }}_ds.ptr;
 {%- endfor %}
@@ -283,10 +285,19 @@ void run(const std::array<uint_t, ndim>& domain,
 
     dim3 gdim(i_block_size, j_block_size, k_block_size);
     dim3 bdim({{ block_sizes[0] }}, {{ block_sizes[1] }} + {{ extra_threads }}, 1);
-
+{%- if debug %}
+    printf("DEBUG: gdim = (%d,%d,%d)\n", i_block_size, j_block_size, k_block_size);
+    printf("DEBUG: bdim = (%d,%d,%d)\n", {{ block_sizes[0] }}, {{ block_sizes[1] }} + {{ extra_threads }}, 1);
+{%- endif %}
     cudaMemcpyToSymbol(data_strides, {{ arg_fields[0].name }}_ds.strides.data(), sizeof(uint_t) * ndim);
+{%- if debug %}
+    printf("DEBUG: data_strides = (%d,%d,%d)\n", {{ arg_fields[0].name }}_ds.strides[0], {{ arg_fields[0].name }}_ds.strides[1], {{ arg_fields[0].name }}_ds.strides[2]);
+{%- endif %}
 {%- if tmp_fields %}
     cudaMemcpyToSymbol(temp_strides, {{ tmp_fields[0].name }}_ds.strides.data(), sizeof(uint_t) * ndim);
+{%- if debug %}
+    printf("DEBUG: temp_strides = (%d,%d,%d)\n", {{ tmp_fields[0].name }}_ds.strides[0], {{ tmp_fields[0].name }}_ds.strides[1], {{ tmp_fields[0].name }}_ds.strides[2]);
+{%- endif %}
 {%- endif %}
 
     {{ multi.name }}_kernel<<<gdim, bdim>>>(
@@ -312,8 +323,14 @@ void run(const std::array<uint_t, ndim>& domain,
 {# --- C++ --- #}
 {%- else %}
     const auto data_strides = {{ arg_fields[0].name }}_ds.strides;
+{%- if debug %}
+    printf("DEBUG: data_strides = (%d,%d,%d)\n", data_strides[0], data_strides[1], data_strides[2]);
+{%- endif %}
 {%- if tmp_fields %}
     const auto temp_strides = {{ tmp_fields[0].name }}_ds.strides;
+{%- if debug %}
+    printf("DEBUG: temp_strides = (%d,%d,%d)\n", temp_strides[0], temp_strides[1], temp_strides[2]);
+{%- endif %}
 {%- endif %}
 {% for multi in multi_stages %}
 {%- if multi.exec == "parallel" %}

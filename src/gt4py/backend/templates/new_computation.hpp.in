@@ -21,17 +21,14 @@
     - stencil_unique_name: str
 #}
 
-#include <array>
-#include <cstdint>
-#include <vector>
+#include <gridtools/common/defs.hpp>
 
+#include <array>
+#include <vector>
 {%- if "cuda" in backend %}
 #include <cuda.h>
 #include <cuda_runtime.h>
 {%- endif %}
-
-#include <gridtools/common/defs.hpp>
-namespace gt = ::gridtools;
 
 using py_size_t = std::intptr_t;
 using uint_t = unsigned;
@@ -44,6 +41,8 @@ struct BufferInfo {
     std::vector<py_size_t> strides;
     void* ptr;
 };
+
+namespace gt = ::gridtools;
 
 namespace {{ stencil_unique_name }} {
 

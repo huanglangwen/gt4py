@@ -67,7 +67,7 @@ static constexpr uint_t k_axis_n_intervals = {{ k_axis.n_intervals }};
 static constexpr uint_t ndim = {{ max_ndim }};
 
 // These halo sizes are used to determine the sizes of the temporaries
-static const uint_t halo_sizes[] = { {{ halo_sizes[0] }}, {{ halo_sizes[1] }}, {{ halo_sizes[2] }} };
+static uint_t halo_sizes[] = { {{ halo_sizes[0] }}, {{ halo_sizes[1] }}, {{ halo_sizes[2] }} };
 {% if tmp_fields -%}
 static int temp_offset = -1;
 {%- endif %}
@@ -124,12 +124,13 @@ data_store_t<DataType> make_data_store(const BufferInfo& bi,
 
 {% if tmp_fields -%}
 template<typename DataType>
-data_store_t<DataType> make_temp_store(const std::array<uint_t, ndim>& compute_domain) {
+data_store_t<DataType> make_temp_store(const std::array<uint_t, ndim>& compute_domain,
+                                       const std::array<uint_t, ndim>& origin) {
     // Compute dims
     uint_t data_size = 1;
     std::array<uint_t, ndim> dims{};
     for(uint_t i = 0; i < ndim; ++i) {
-      dims[i] = halo_sizes[i] + compute_domain[i] + halo_sizes[i];
+      dims[i] = compute_domain[i] + 2 * origin[i];
       data_size *= dims[i];
     }
 
@@ -139,7 +140,7 @@ data_store_t<DataType> make_temp_store(const std::array<uint_t, ndim>& compute_d
     std::array<uint_t, ndim> strides{};
     for(int i = ndim - 1; i >= 0; --i) {
       strides[i] = stride;
-      offset += stride * halo_sizes[i];
+      offset += stride * origin[i];
       stride *= dims[i];
     }
 
@@ -239,6 +240,13 @@ void run(const std::array<uint_t, ndim>& domain,
          {{- comma() }}
          {{ param.dtype }} {{ param.name }}
 {%- endfor %}) {
+    // Compute min origin
+    std::array<uint_t, ndim> min_origin = {{ arg_fields[0].name }}_origin;
+    for (uint_t i = 0; i < ndim; ++i) {
+      if(min_origin[i] < halo_sizes[i])
+          halo_sizes[i] = min_origin[i];
+    }
+
     // Initialize data stores from input buffers
 {%- for field in arg_fields %}
     auto {{ field.name }}_ds = make_data_store<{{ field.dtype }}>(bi_{{ field.name }}, domain, {{ field.name }}_origin);
@@ -247,7 +255,7 @@ void run(const std::array<uint_t, ndim>& domain,
 {% if tmp_fields -%}
     // Allocate temporary storages
 {%- for field in tmp_fields %}
-    auto {{ field.name }}_ds = make_temp_store<{{ field.dtype }}>(domain);
+    auto {{ field.name }}_ds = make_temp_store<{{ field.dtype }}>(domain, min_origin);
 {%- endfor %}
 {%- endif %}
     const int i_min = halo_sizes[0];

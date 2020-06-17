@@ -279,7 +279,7 @@ class StencilObject(abc.ABC):
 
         debug_mode = "debug_mode" in self.options and self.options["debug_mode"]
         if debug_mode:
-            test_builder = TestBuilder(self.options["name"], self.__class__.__name__, self.__class__.__module__)
+            test_builder = TestBuilder(self)
             out_fields = test_builder.write_test(
                 self.backend, domain, origin, shapes, field_args, parameter_args
             )

@@ -49,7 +49,9 @@ class TestBuilder:
                 field_idx for field_idx, field_arg in enumerate(field_args) if "out" in field_arg
             ]
             if len(out_indices) < 1:
-                out_indices.append(0)
+                out_indices = [
+                    field_idx for field_idx, field_arg in enumerate(field_args) if field_arg in origins
+                ]
 
         for field_idx, field_arg in enumerate(field_args):
             field = field_args[field_arg]
@@ -60,16 +62,17 @@ class TestBuilder:
             data_file = open(data_path, "w")
             data_file.write(str_io.getvalue().rstrip().replace("\n", ","))
 
-            arg_fields.append(
-                dict(
-                    name=field_arg,
-                    dtype=str(field.dtype),
-                    origin=origins[field_arg],
-                    shape=shapes[field_arg],
-                    stride=field.strides,
-                    size=field.size,
+            if field_arg in origins and field_arg in shapes:
+                arg_fields.append(
+                    dict(
+                        name=field_arg,
+                        dtype=str(field.dtype),
+                        origin=origins[field_arg],
+                        shape=shapes[field_arg],
+                        stride=field.strides,
+                        size=field.size,
+                    )
                 )
-            )
 
             if field_idx in out_indices:
                 out_fields.append(dict(name=field_arg, dtype=str(field.dtype), size=field.size))

@@ -19,6 +19,7 @@
     - arg_fields: [{ "name": str, "dtype": str, "layout_id": int }]
     - parameters: [{ "name": str, "dtype": str }]
     - stencil_unique_name: str
+    - max_ndim: int
 #}
 
 #include <gridtools/common/defs.hpp>
@@ -46,7 +47,7 @@ namespace gt = ::gridtools;
 
 namespace {{ stencil_unique_name }} {
 
-void run(const std::array<uint_t, 3>& domain,
+void run(const std::array<uint_t, {{ max_ndim }}>& domain,
 {%- set comma = joiner(", ") %}
 {%- for field in arg_fields -%}
          {{- comma() }}

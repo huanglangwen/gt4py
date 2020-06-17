@@ -205,13 +205,17 @@ __global__ void __launch_bounds__({{ max_threads }}) {{ multi.name }}_kernel(
     int j =  j_min + (blockDim.y * blockIdx.y + threadIdx.y);
     //int k =  k_min + (blockDim.z * blockIdx.z + threadIdx.z);
 
+    {%- for access in access_vars %}
+        {{ access.itype }} {{ access.name }} = 0;
+    {%- endfor %}
+
     for (int k = k_min + 0; k <= k_max + 0; ++k) {
     {%- for step in multi.steps %}
       {%- for region in step.regions %}
           if(i >= {{ step.extents[0] }} && i <= i_max + {{ step.extents[1] }} &&
              j >= {{ step.extents[2] }} && j <= j_max + {{ step.extents[3] }}) {
           {%- for access in access_vars %}
-            {{ access.itype }} {{ access.name }} = {{ access.expr }};
+            {{ access.name }} = {{ access.expr }};
           {%- endfor %}
           {{ region.body }}
       }
@@ -349,13 +353,16 @@ void run(const std::array<uint_t, ndim>& domain,
 {%- else %}
     for (int k = k_{{ multi.interval[0].level }} + {{ multi.interval[0].offset }} + {{ multi.steps[0].extents[4] }}; k <= k_{{ multi.interval[1].level }} + {{ multi.interval[1].offset }} + {{ multi.steps[0].extents[5] }}; ++k) {
 {%- endif %}
+{%- for access in access_vars %}
+    {{ access.itype }} {{ access.name }} = 0;
+{%- endfor %}
 {%- for step in multi.steps %}
     {%- for region in step.regions %}
       for (int i = i_min + {{ step.extents[0] }}; i <= i_max + {{ step.extents[1] }}; ++i) {
         #pragma omp simd
         for (int j = j_min + {{ step.extents[2] }}; j <= j_max + {{ step.extents[3] }}; ++j) {
 {%- for access in access_vars %}
-          {{ access.itype }} {{ access.name }} = {{ access.expr }};
+          {{ access.name }} = {{ access.expr }};
 {%- endfor %}
           {{ region.body }}
         }

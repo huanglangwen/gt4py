@@ -7,15 +7,10 @@ import gt4py.backend as gt_backend
 
 
 class TestBuilder:
-    def __init__(
-        self,
-        stencil_short_name: str,
-        stencil_unique_name: str,
-        module: str,
-    ):
-        self.stencil_short_name = stencil_short_name
-        self.stencil_unique_name = stencil_unique_name
-        self.module = module
+    def __init__(self, stencil_object):
+        self.stencil_short_name = stencil_object.options["name"]
+        self.stencil_unique_name = stencil_object.__class__.__name__
+        self.module = stencil_object.__class__.__module__
 
     def write_test(
         self,
@@ -27,7 +22,7 @@ class TestBuilder:
         parameter_args: dict,
         out_indices=[],
     ):
-        components = self.__class__.__module__.split(".")[1:]
+        components = self.module.split(".")[1:]
         if "GT_CACHE_DIR_NAME" in os.environ:
             unit_test_dir = os.environ["GT_CACHE_DIR_NAME"]
         else:

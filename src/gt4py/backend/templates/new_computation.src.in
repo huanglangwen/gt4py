@@ -170,14 +170,6 @@ void free_temp_store(data_store_t<DataType>& temp) {
 }  // namespace
 
 {% if "cuda" in gt_backend -%}
-{# NOTE i_stride == 1, e.g. strides = (1, 64, 3520)
-{% set jboundary_limit = block_sizes[1] + max_extents[3] - max_extents[2] %}
-{% set iminus_limit = jboundary_limit + (1 if max_extents[0] < 0 else 0) %}
-{% set iplus_limit = iminus_limit + (1 if max_extents[1] > 0 else 0) %} #}
-{# TODO Actually compute these...
-{% set k_interval_min = 0 %}
-{% set k_interval_diff = 0 %}
-{% set k_interval_offset = -1 %} #}
 __constant__ uint_t data_strides[{{ max_ndim }}];
 {% if tmp_fields -%}
 __constant__ uint_t temp_strides[{{ max_ndim }}];
@@ -344,6 +336,9 @@ void run(const std::array<uint_t, ndim>& domain,
     printf("DEBUG: temp_strides = (%d,%d,%d)\n", temp_strides[0], temp_strides[1], temp_strides[2]);
 {%- endif %}
 {%- endif %}
+{%- for access in access_vars %}
+    {{ access.itype }} {{ access.name }} = 0;
+{%- endfor %}
 {% for multi in multi_stages %}
 {%- if multi.exec == "parallel" %}
     #pragma omp parallel for schedule(runtime)
@@ -353,9 +348,6 @@ void run(const std::array<uint_t, ndim>& domain,
 {%- else %}
     for (int k = k_{{ multi.interval[0].level }} + {{ multi.interval[0].offset }} + {{ multi.steps[0].extents[4] }}; k <= k_{{ multi.interval[1].level }} + {{ multi.interval[1].offset }} + {{ multi.steps[0].extents[5] }}; ++k) {
 {%- endif %}
-{%- for access in access_vars %}
-    {{ access.itype }} {{ access.name }} = 0;
-{%- endfor %}
 {%- for step in multi.steps %}
     {%- for region in step.regions %}
       for (int i = i_min + {{ step.extents[0] }}; i <= i_max + {{ step.extents[1] }}; ++i) {

@@ -289,7 +289,7 @@ void run(const std::array<uint_t, ndim>& domain,
     const uint_t j_size = domain[1] - 2 * j_min;
     const uint_t k_size = domain[2] - 2 * k_min;
     const uint_t i_block_size = (i_size + {{ block_sizes[0] }} - 1) / {{ block_sizes[0] }};
-    const uint_t j_block_size = ((j_size + {{ block_sizes[1] }}  - 1) / {{ block_sizes[1] }}) * 2;
+    const uint_t j_block_size = ((j_size + {{ block_sizes[1] }}  - 1) / {{ block_sizes[1] }}) * 2 + 1;
 {%- if do_k_parallel %}
     const uint_t k_block_size = ((domain[2] + {{ block_sizes[2] }} - 1) / {{ block_sizes[2] }}) / 4;
 {%- else %}

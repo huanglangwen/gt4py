@@ -23,6 +23,7 @@
     - k_axis: { "n_intervals": int, "offset_limit": int}
     - max_ndim: int
     - multi_stages: [{ "name": str, "exec": str, "interval": [{ "level": str, "offset": int }], "steps": [{
+            "stage_name": str,
             "args": [
                 {
                     "name": str
@@ -52,7 +53,9 @@
 #}
 
 #include "computation.hpp"
+{%- if "cuda" in gt_backend %}
 #include <algorithm>
+{%- endif %}
 {#
 #include <cassert>
 #include <stdexcept>
@@ -208,6 +211,7 @@ __global__ void __launch_bounds__({{ max_threads }}) {{ multi.name }}_kernel(
 
     for (int k = k_min + 0; k <= k_max + 0; ++k) {
     {%- for step in multi.steps %}
+          // {{ step.stage_name }}
       {%- for region in step.regions %}
           if(i >= {{ step.extents[0] }} && i <= i_max + {{ step.extents[1] }} &&
              j >= {{ step.extents[2] }} && j <= j_max + {{ step.extents[3] }}) {
@@ -354,6 +358,7 @@ void run(const std::array<uint_t, ndim>& domain,
     for (int k = k_{{ multi.interval[0].level }} + {{ multi.interval[0].offset }} + {{ multi.steps[0].extents[4] }}; k <= k_{{ multi.interval[1].level }} + {{ multi.interval[1].offset }} + {{ multi.steps[0].extents[5] }}; ++k) {
 {%- endif %}
 {%- for step in multi.steps %}
+      // {{ step.stage_name }}
     {%- for region in step.regions %}
       for (int i = i_min + {{ step.extents[0] }}; i <= i_max + {{ step.extents[1] }}; ++i) {
         #pragma omp simd

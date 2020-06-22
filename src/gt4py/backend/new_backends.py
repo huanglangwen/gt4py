@@ -200,6 +200,7 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
                         )
 
                     step = self.visit(stage)
+                    step["stage_name"] = stage.name
                     for region in step["regions"]:
                         body = region["body"]
                         max_len = self.MAX_LINE_LEN

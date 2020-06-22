@@ -52,6 +52,7 @@
 #}
 
 #include "computation.hpp"
+#include <algorithm>
 {#
 #include <cassert>
 #include <stdexcept>
@@ -144,6 +145,10 @@ data_store_t<DataType> make_temp_store(const std::array<uint_t, ndim>& compute_d
       stride *= dims[i];
     }
 
+{%- if "cuda" in gt_backend %}
+    // Reverse stride array...
+    std::reverse(std::begin(strides), std::end(strides));
+{%- endif %}
     // Allocate pointer and shift by halo offset...
 {%- if "cuda" in gt_backend %}
     DataType* ptr;

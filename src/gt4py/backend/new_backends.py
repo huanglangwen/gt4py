@@ -58,7 +58,7 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
     TEMPLATE_FILES["computation.src"] = "new_computation.src.in"
 
     ITERATORS = ("i", "j", "k")
-    BLOCK_SIZES = (64, 4, 1)
+    BLOCK_SIZES = (32, 8, 1)
 
     def __init__(self, class_name, module_name, gt_backend_t, options):
         super().__init__(class_name, module_name, gt_backend_t, options)
@@ -253,8 +253,8 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
             max_extents=max_extents,
             max_threads=max_threads,
             extra_threads=extra_threads,
-            do_k_parallel=False,
-            debug=False,
+            do_k_parallel=True,
+            debug=True,
         )
 
         sources = {}

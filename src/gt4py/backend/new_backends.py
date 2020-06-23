@@ -23,6 +23,7 @@ import types
 
 import jinja2
 import numpy as np
+import subprocess as sub
 
 from gt4py import analysis as gt_analysis
 from gt4py import backend as gt_backend
@@ -51,7 +52,6 @@ class _MaxKOffsetExtractor(gt_ir.IRNodeVisitor):
 class OptExtGenerator(gt_backend.GTPyExtGenerator):
     OP_TO_CPP = gt_backend.GTPyExtGenerator.OP_TO_CPP
     DATA_TYPE_TO_CPP = gt_backend.GTPyExtGenerator.DATA_TYPE_TO_CPP
-    MAX_LINE_LEN = 120
 
     TEMPLATE_FILES = copy.deepcopy(gt_backend.GTPyExtGenerator.TEMPLATE_FILES)
     TEMPLATE_FILES["computation.hpp"] = "new_computation.hpp.in"
@@ -72,13 +72,19 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
         for pair in tuple(max_extent):
             max_extents.extend(list(pair))
         if "cuda" in self.backend:
-            extra_thread_minus = 0 #1 if max_extents[0] < 0 else 0
-            extra_thread_plus = 0 #1 if max_extents[1] > 0 else 0
+            extra_thread_minus = 0  # 1 if max_extents[0] < 0 else 0
+            extra_thread_plus = 0  # 1 if max_extents[1] > 0 else 0
             extra_threads = extra_thread_minus + extra_thread_plus
             max_threads = block_sizes[0] * (
                 block_sizes[1] + max_extents[3] - max_extents[2] + extra_threads
             )
         return max_extents, max_threads, extra_threads
+
+    def _format_source(self, source):
+        proc = sub.run(["clang-format"], stdout=sub.PIPE, input=source, encoding="ascii")
+        if proc.returncode == 0:
+            return proc.stdout
+        return source
 
     def visit_BinOpExpr(self, node: gt_ir.BinOpExpr):
         if node.op.python_symbol == "**" and node.rhs.value == 2:
@@ -102,10 +108,10 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
                 iter_tuple.append(iter)
 
         data_type = "temp" if node.name in self.tmp_fields_ else "data"
-        idx_key = data_type + "".join(iter_tuple)
+        idx_key = f"{data_type}_" + "".join(iter_tuple)
         if idx_key not in self.access_map_:
             suffix = idx_key.replace(",", "").replace("+", "p").replace("-", "m")
-            idx_name = f"{data_type}_idx_{suffix}"
+            idx_name = f"idx_{suffix}"
             stride_name = f"{data_type}_strides"
             strides = [f"(({iter_tuple[i]}) * {stride_name}[{i}])" for i in range(len(iter_tuple))]
             idx_expr = " + ".join(strides)
@@ -176,10 +182,9 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
             if name not in node.unreferenced
         ]
 
-        steps = []
         multi_stages = []
-
         for multi_stage in node.multi_stages:
+            steps = []
             for group in multi_stage.groups:
                 interval = []
                 for stage in group.stages:
@@ -201,26 +206,6 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
 
                     step = self.visit(stage)
                     step["stage_name"] = stage.name
-                    for region in step["regions"]:
-                        body = region["body"]
-                        max_len = self.MAX_LINE_LEN
-                        if len(body) > max_len:
-                            lines = []
-                            nlines = (len(body) // max_len) + 1
-                            last_pos = 0
-                            pos = -1
-
-                            for n in range(nlines):
-                                ndx = body.find(" ", pos + 1)
-                                while ndx >= 0 and ndx < max_len:
-                                    pos = ndx
-                                    ndx = body.find(" ", ndx + 1)
-                                if pos != last_pos:
-                                    lines.append(body[last_pos:pos])
-                                    last_pos = pos
-                            lines.append(body[last_pos + 1:])
-                            region["body"] = "\n".join(lines)
-
                     step["extents"] = extents
                     steps.append(step)
 
@@ -255,12 +240,12 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
             max_threads=max_threads,
             extra_threads=extra_threads,
             do_k_parallel=False,
-            debug=True,
+            debug=False,
         )
 
         sources = {}
         for key, template in self.templates.items():
-            sources[key] = template.render(**template_args)
+            sources[key] = self._format_source(template.render(**template_args))
 
         return sources
 

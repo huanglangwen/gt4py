@@ -349,6 +349,7 @@ void run(const std::array<uint_t, ndim>& domain,
     {{ access.itype }} {{ access.name }} = 0;
 {%- endfor %}
 {% for multi in multi_stages %}
+    // {{ multi.name }}
 {%- if multi.exec == "parallel" %}
     #pragma omp parallel for schedule(runtime)
 {%- endif %}
@@ -358,7 +359,7 @@ void run(const std::array<uint_t, ndim>& domain,
     for (int k = k_{{ multi.interval[0].level }} + {{ multi.interval[0].offset }} + {{ multi.steps[0].extents[4] }}; k <= k_{{ multi.interval[1].level }} + {{ multi.interval[1].offset }} + {{ multi.steps[0].extents[5] }}; ++k) {
 {%- endif %}
 {%- for step in multi.steps %}
-      // {{ step.stage_name }}
+      // {{ step.stage_name }}:
     {%- for region in step.regions %}
       for (int i = i_min + {{ step.extents[0] }}; i <= i_max + {{ step.extents[1] }}; ++i) {
         #pragma omp simd

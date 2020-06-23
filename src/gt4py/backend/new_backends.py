@@ -185,8 +185,9 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
         multi_stages = []
         for multi_stage in node.multi_stages:
             steps = []
+            last_interval = []
+            n_multi_stages = 0
             for group in multi_stage.groups:
-                interval = []
                 for stage in group.stages:
                     stage_start = stage.apply_blocks[0].interval.start
                     start_level = "min" if stage_start.level == gt_ir.LevelMarker.START else "max"
@@ -196,6 +197,20 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
                         dict(level=start_level, offset=stage_start.offset),
                         dict(level=end_level, offset=stage_end.offset),
                     ]
+
+                    # Force a new multi-stage when intervals change...
+                    if len(last_interval) > 0 and interval != last_interval:
+                        multi_stages.append(
+                            {
+                                "name": f"{multi_stage.name}_{n_multi_stages}",
+                                "exec": str(multi_stage.iteration_order).lower(),
+                                "interval": last_interval,
+                                "steps": steps,
+                            }
+                        )
+                        n_multi_stages += 1
+                        steps = []
+                    last_interval = interval
 
                     extents = []
                     compute_extent = stage.compute_extent
@@ -211,9 +226,9 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
 
             multi_stages.append(
                 {
-                    "name": multi_stage.name,
+                    "name": f"{multi_stage.name}_{n_multi_stages}",
                     "exec": str(multi_stage.iteration_order).lower(),
-                    "interval": interval,
+                    "interval": last_interval,
                     "steps": steps,
                 }
             )

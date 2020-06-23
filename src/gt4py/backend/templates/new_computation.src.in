@@ -43,7 +43,7 @@
     - parameters: [{ "name": str, "dtype": str }]
     - stencil_unique_name: str
     - tmp_fields: [{ "name": str, "dtype": str }]
-    - access_vars: [{ "name": str, "expr": str, "itype": str }]
+    - access_vars: [{ "name": str, "expr": str, "itype": str, "stages": [str] }]
     - block_sizes: [int]
     - max_extents: [int]
     - max_threads: int
@@ -173,6 +173,7 @@ void free_temp_store(data_store_t<DataType>& temp) {
 {%- else %}
     delete[] temp.ptr;
 {%- endif %}
+    temp.ptr = nullptr;
 }
 {%- endif %}
 }  // namespace
@@ -216,7 +217,9 @@ __global__ void __launch_bounds__({{ max_threads }}) {{ multi.name }}_kernel(
           if(i >= {{ step.extents[0] }} && i <= i_max + {{ step.extents[1] }} &&
              j >= {{ step.extents[2] }} && j <= j_max + {{ step.extents[3] }}) {
           {%- for access in access_vars %}
+            {%- if step.stage_name in access.stages %}
             {{ access.name }} = {{ access.expr }};
+            {%- endif -%}
           {%- endfor %}
           {{ region.body }}
       }
@@ -364,8 +367,10 @@ void run(const std::array<uint_t, ndim>& domain,
       for (int i = i_min + {{ step.extents[0] }}; i <= i_max + {{ step.extents[1] }}; ++i) {
         #pragma omp simd
         for (int j = j_min + {{ step.extents[2] }}; j <= j_max + {{ step.extents[3] }}; ++j) {
-{%- for access in access_vars %}
-          {{ access.name }} = {{ access.expr }};
+        {%- for access in access_vars %}
+          {%- if step.stage_name in access.stages %}
+            {{ access.name }} = {{ access.expr }};
+          {%- endif -%}
 {%- endfor %}
           {{ region.body }}
         }

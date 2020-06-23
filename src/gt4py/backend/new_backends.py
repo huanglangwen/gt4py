@@ -64,6 +64,7 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
         super().__init__(class_name, module_name, gt_backend_t, options)
         self.access_map_ = dict()
         self.tmp_fields_ = dict()
+        self.curr_stage_ = ""
 
     def _compute_max_threads(self, block_sizes: tuple, max_extent: gt_definitions.Extent):
         max_threads = 0
@@ -115,7 +116,9 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
             stride_name = f"{data_type}_strides"
             strides = [f"(({iter_tuple[i]}) * {stride_name}[{i}])" for i in range(len(iter_tuple))]
             idx_expr = " + ".join(strides)
-            self.access_map_[idx_key] = dict(name=idx_name, expr=idx_expr, itype="int")
+            self.access_map_[idx_key] = dict(name=idx_name, expr=idx_expr, itype="int", stages=set())
+
+        self.access_map_[idx_key]["stages"].add(self.curr_stage_)
 
         return node.name + "[" + self.access_map_[idx_key]["name"] + "]"
 
@@ -139,6 +142,10 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
                 source += "[{idx}]".format(idx=idx)
 
         return source
+
+    def visit_Stage(self, node: gt_ir.Stage):
+        self.curr_stage_ = node.name
+        return super().visit_Stage(node)
 
     def visit_StencilImplementation(self, node: gt_ir.StencilImplementation):
         offset_limit = _MaxKOffsetExtractor.apply(node)

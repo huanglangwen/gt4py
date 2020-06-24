@@ -27,6 +27,7 @@ import jinja2
 import numpy as np
 
 from typing import List, Dict, Type
+from collections import OrderedDict
 
 import dawn4py
 from dawn4py.serialization import SIR
@@ -57,9 +58,11 @@ class FieldDeclCollector(gt_ir.IRNodeVisitor):
         return cls()(definition_ir)
 
     def __call__(self, definition_ir):
-        self.fields = []
+        self.fields_ = []
+        self.accesses_ = OrderedDict()
+        self.is_write_ = False
         self.visit(definition_ir)
-        return self.fields
+        return self.fields_, self.accesses_
 
     def visit_FieldDecl(self, node: gt_ir.FieldDecl, **kwargs):
         # NOTE Add unstructured support here
@@ -67,12 +70,25 @@ class FieldDeclCollector(gt_ir.IRNodeVisitor):
             [1 if ax in node.axes else 0 for ax in DOMAIN_AXES]
         )
         is_temporary = not node.is_api
-        self.fields.append(
+        self.fields_.append(
             sir_utils.make_field(
                 name=node.name, dimensions=field_dimensions, is_temporary=is_temporary
             )
         )
 
+    def visit_FieldRef(self, node: gt_ir.FieldRef, **kwargs):
+        field_name = node.name
+        if self.is_write_:
+            self.accesses_[field_name] = gt_definitions.AccessKind.READ_WRITE
+        else:
+            if field_name not in self.accesses_:
+                self.accesses_[field_name] = gt_definitions.AccessKind.READ_ONLY
+
+    def visit_Assign(self, node: gt_ir.Assign, **kwargs):
+        self.is_write_ = True
+        left = self.visit(node.target)
+        self.is_write_ = False
+        right = self.visit(node.value)
 
 class SIRConverter(gt_ir.IRNodeVisitor):
     OP_TO_CPP = gt_backend.GTPyExtGenerator.OP_TO_CPP
@@ -234,7 +250,7 @@ class SIRConverter(gt_ir.IRNodeVisitor):
         functions = []
         global_variables = self._make_global_variables(node.parameters, node.externals)
 
-        fields = FieldDeclCollector.apply(node)  # [self.visit(field) for field in node.api_fields]
+        fields, accesses = FieldDeclCollector.apply(node)
         stencil_ast = sir_utils.make_ast(
             [self.visit(computation) for computation in node.computations]
         )
@@ -665,7 +681,7 @@ class DawnNaiveBackend(BaseDawnBackend):
 @gt_backend.register
 class DawnOptBackend(BaseDawnBackend):
 
-    DAWN_BACKEND_NS = "cxxnaive"
+    DAWN_BACKEND_NS = "cxxopt"
     DAWN_BACKEND_NAME = "CXXOpt"
     GT_BACKEND_T = "x86"
 

@@ -72,9 +72,6 @@ static constexpr uint_t ndim = {{ max_ndim }};
 
 // These halo sizes are used to determine the sizes of the temporaries
 static uint_t halo_sizes[] = { {{ halo_sizes[0] }}, {{ halo_sizes[1] }}, {{ halo_sizes[2] }} };
-{% if tmp_fields -%}
-static int temp_offset = -1;
-{%- endif %}
 
 {% if constants -%}
 // Constants
@@ -120,7 +117,6 @@ data_store_t<DataType> make_data_store(const BufferInfo& bi,
     DataType* ptr = static_cast<DataType*>(bi.ptr);
     for (uint_t i = 0; i < ndim; ++i) {
         strides[i] = bi.strides[i] / sizeof(DataType);
-        ptr += strides[i] * (origin[i] - halo_sizes[i]);
         dims[i] = compute_domain[i]+2*origin[i];
     }
     return data_store_t<DataType>{dims, strides, ptr};
@@ -139,12 +135,10 @@ data_store_t<DataType> make_temp_store(const std::array<uint_t, ndim>& compute_d
     }
 
     // Compute strides and offset
-    uint_t offset = 0;
     uint_t stride = 1;
     std::array<uint_t, ndim> strides{};
     for(int i = ndim - 1; i >= 0; --i) {
       strides[i] = stride;
-      offset += stride * origin[i];
       stride *= dims[i];
     }
 
@@ -159,15 +153,12 @@ data_store_t<DataType> make_temp_store(const std::array<uint_t, ndim>& compute_d
 {%- else %}
     DataType* ptr = new DataType[data_size];
 {%- endif %}
-    ptr += offset;
-    temp_offset = offset;
 
     return data_store_t<DataType>{dims, strides, ptr};
 }
 
 template<typename DataType>
 void free_temp_store(data_store_t<DataType>& temp) {
-    temp.ptr -= temp_offset;
 {%- if "cuda" in gt_backend %}
     cudaFree(temp.ptr);
 {%- else %}
@@ -266,11 +257,11 @@ void run(const std::array<uint_t, ndim>& domain,
     auto {{ field.name }}_ds = make_temp_store<{{ field.dtype }}>(domain, min_origin);
 {%- endfor %}
 {%- endif %}
-    const int i_min = halo_sizes[0];
+    const int i_min = min_origin[0];
     const int i_max = domain[0] + i_min - 1;
-    const int j_min = halo_sizes[1];
+    const int j_min = min_origin[1];
     const int j_max = domain[1] + j_min - 1;
-    const int k_min = halo_sizes[2];
+    const int k_min = min_origin[2];
     const int k_max = domain[2] + k_min - 1;
 {%- if debug %}
     printf("DEBUG: origin = (%d,%d,%d)\n", {{ arg_fields[0].name }}_origin[0], {{ arg_fields[0].name }}_origin[1], {{ arg_fields[0].name }}_origin[2]);

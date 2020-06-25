@@ -90,6 +90,7 @@ class FieldDeclCollector(gt_ir.IRNodeVisitor):
         self.is_write_ = False
         right = self.visit(node.value)
 
+
 class SIRConverter(gt_ir.IRNodeVisitor):
     OP_TO_CPP = gt_backend.GTPyExtGenerator.OP_TO_CPP
 
@@ -251,6 +252,14 @@ class SIRConverter(gt_ir.IRNodeVisitor):
         global_variables = self._make_global_variables(node.parameters, node.externals)
 
         fields, accesses = FieldDeclCollector.apply(node)
+
+        out_fields = [
+            field
+            for field in fields
+            if not field.is_temporary
+            and accesses[field.name] == gt_definitions.AccessKind.READ_WRITE
+        ]
+
         stencil_ast = sir_utils.make_ast(
             [self.visit(computation) for computation in node.computations]
         )
@@ -295,7 +304,6 @@ _DAWN_BACKEND_OPTIONS = {**_DAWN_BASE_OPTIONS, **_DAWN_TOOLCHAIN_OPTIONS}
 
 
 class DawnPyModuleGenerator(gt_backend.GTPyModuleGenerator):
-
     def __init__(self, backend_class, options):
         super().__init__(backend_class, options)
 
@@ -315,7 +323,9 @@ class DawnPyModuleGenerator(gt_backend.GTPyModuleGenerator):
                     ndims = len(self.implementation_ir.fields[arg.name].axes)
                     zeros = ", ".join(["0"] * ndims)
                     args.append("[{}]".format(zeros))
-                    empty_checks.append(f"{arg.name} = np.empty(({zeros})) if {arg.name} is None else {arg.name}")
+                    empty_checks.append(
+                        f"{arg.name} = np.empty(({zeros})) if {arg.name} is None else {arg.name}"
+                    )
                 else:
                     args.append("list(_origin_['{}'])".format(arg.name))
             elif arg.name in self.implementation_ir.parameters and arg.default == None:
@@ -329,7 +339,7 @@ pyext_module.run_computation(list(_domain_), {run_args}, exec_info)
 """.format(
             empty_checks="\n".join(empty_checks),
             none_checks="\n".join(none_checks),
-            run_args=", ".join(args)
+            run_args=", ".join(args),
         )
         if self.backend_name.endswith("cuda"):
             source = (
@@ -393,7 +403,10 @@ class BaseDawnBackend(gt_backend.BaseGTBackend):
         )
 
         # Generate and return the Python wrapper class
-        extra_cache_info = {"pyext_module_name": pyext_module_name, "pyext_file_path": pyext_file_path}
+        extra_cache_info = {
+            "pyext_module_name": pyext_module_name,
+            "pyext_file_path": pyext_file_path,
+        }
 
         return cls._generate_module(
             stencil_id, definition_ir, definition_func, options, extra_cache_info, **kwargs
@@ -438,11 +451,7 @@ class BaseDawnBackend(gt_backend.BaseGTBackend):
             if key in _DAWN_TOOLCHAIN_OPTIONS.keys()
         }
         source = dawn4py.compile(
-            sir,
-            groups=pass_groups,
-            backend=dawn_backend,
-            run_with_sync=False,
-            **dawn_opts,
+            sir, groups=pass_groups, backend=dawn_backend, run_with_sync=False, **dawn_opts
         )
         stencil_unique_name = cls.get_pyext_class_name(stencil_id)
         module_name = cls.get_pyext_module_name(stencil_id)
@@ -490,14 +499,14 @@ class BaseDawnBackend(gt_backend.BaseGTBackend):
 
     @classmethod
     def build_extension_module(
-            cls,
-            stencil_id: gt_definitions.StencilID,
-            pyext_sources: Dict[str, str],
-            pyext_build_opts: Dict[str, str],
-            *,
-            pyext_extra_include_dirs: List[str] = None,
-            uses_cuda: bool = False,
-            **kwargs,
+        cls,
+        stencil_id: gt_definitions.StencilID,
+        pyext_sources: Dict[str, str],
+        pyext_build_opts: Dict[str, str],
+        *,
+        pyext_extra_include_dirs: List[str] = None,
+        uses_cuda: bool = False,
+        **kwargs,
     ):
 
         # Build extension module
@@ -541,10 +550,12 @@ class BaseDawnBackend(gt_backend.BaseGTBackend):
 
     @classmethod
     def _generate_module(
-            cls, stencil_id, definition_ir, definition_func, options, extra_cache_info, **kwargs
+        cls, stencil_id, definition_ir, definition_func, options, extra_cache_info, **kwargs
     ):
         if options.dev_opts.get("code-generation", True):
-            implementation_ir = kwargs["implementation_ir"] if "implementation_ir" in kwargs else None
+            implementation_ir = (
+                kwargs["implementation_ir"] if "implementation_ir" in kwargs else None
+            )
             if implementation_ir is None:
                 implementation_ir = gt_analysis.transform(definition_ir, options)
 

@@ -193,15 +193,11 @@ __global__ void __launch_bounds__({{ max_threads }}) {{ multi.name }}_kernel(
     const {{ param.dtype }} {{ param.name }}
 {%- endfor -%}
 ) {
-    int i = i_min + {{ step.extents[0] }} + (blockDim.x * blockIdx.x + threadIdx.x);
-    int j = j_min + {{ step.extents[2] }} + (blockDim.y * blockIdx.y + threadIdx.y);
+    int i_block = blockDim.x * blockIdx.x + threadIdx.x;
+    int j_block = blockDim.y * blockIdx.y + threadIdx.y;
     {%- if do_k_parallel %}
-    int k =  k_min + {{ step.extents[4] }} + (blockDim.z * blockIdx.z + threadIdx.z);
+    int k_block = blockDim.z * blockIdx.z + threadIdx.z;
     {%- endif %}
-
-    if (i > i_max + {{ step.extents[1] }} || j > j_max + {{ step.extents[3] }}) // || k > k_max + {{ step.extents[5] }})
-        return;
-
     {%- for access in access_vars %}
         {{ access.itype }} {{ access.name }} = 0;
     {%- endfor %}
@@ -210,15 +206,22 @@ __global__ void __launch_bounds__({{ max_threads }}) {{ multi.name }}_kernel(
     for (int k = k_min + 0; k <= k_max + 0; ++k) {
     {%- endif %}
     {%- for step in multi.steps %}
-          // {{ step.stage_name }}
+        // {{ step.stage_name }}
       {%- for region in step.regions %}
-          {%- for access in access_vars %}
-            {%- if step.stage_name in access.stages %}
-            {{ access.name }} = {{ access.expr }};
-            {%- endif -%}
-          {%- endfor %}
-          {{ region.body }}
-    {%- endfor %}
+        int i = i_min + {{ step.extents[0] }} + i_block;
+        int j = j_min + {{ step.extents[2] }} + j_block;
+        {%- if do_k_parallel %}
+        int k = k_min + {{ step.extents[4] }} + k_block;
+        {%- endif %}
+        if (i <= i_max + {{ step.extents[1] }} && j <= j_max + {{ step.extents[3] }}) { // && k <= k_max + {{ step.extents[5] }}) {
+        {%- for access in access_vars %}
+          {%- if step.stage_name in access.stages %}
+          {{ access.name }} = {{ access.expr }};
+          {%- endif -%}
+        {%- endfor %}
+        {{ region.body }}
+        }
+      {%- endfor %}
     {%- if not loop.last %}
     __syncthreads();
     {%- endif -%}

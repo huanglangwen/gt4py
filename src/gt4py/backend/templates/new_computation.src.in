@@ -202,16 +202,19 @@ __global__ void __launch_bounds__({{ max_threads }}) {{ multi.name }}_kernel(
         {{ access.itype }} {{ access.name }} = 0;
     {%- endfor %}
 
+    int i, j;
     {%- if not do_k_parallel %}
     for (int k = k_min + 0; k <= k_max + 0; ++k) {
+    {%- else %}
+    int k;
     {%- endif %}
     {%- for step in multi.steps %}
         // {{ step.stage_name }}
       {%- for region in step.regions %}
-        int i = i_min + {{ step.extents[0] }} + i_block;
-        int j = j_min + {{ step.extents[2] }} + j_block;
+        i = i_min + {{ step.extents[0] }} + i_block;
+        j = j_min + {{ step.extents[2] }} + j_block;
         {%- if do_k_parallel %}
-        int k = k_min + {{ step.extents[4] }} + k_block;
+        k = k_min + {{ step.extents[4] }} + k_block;
         {%- endif %}
         if (i <= i_max + {{ step.extents[1] }} && j <= j_max + {{ step.extents[3] }}) { // && k <= k_max + {{ step.extents[5] }}) {
         {%- for access in access_vars %}

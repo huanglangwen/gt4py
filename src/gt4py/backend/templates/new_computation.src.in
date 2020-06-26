@@ -193,27 +193,31 @@ __global__ void __launch_bounds__({{ max_threads }}) {{ multi.name }}_kernel(
     const {{ param.dtype }} {{ param.name }}
 {%- endfor -%}
 ) {
-    int i =  i_min + (blockDim.x * blockIdx.x + threadIdx.x);
-    int j =  j_min + (blockDim.y * blockIdx.y + threadIdx.y);
-    //int k =  k_min + (blockDim.z * blockIdx.z + threadIdx.z);
+    int i = i_min + {{ step.extents[0] }} + (blockDim.x * blockIdx.x + threadIdx.x);
+    int j = j_min + {{ step.extents[2] }} + (blockDim.y * blockIdx.y + threadIdx.y);
+    {%- if do_k_parallel %}
+    int k =  k_min + {{ step.extents[4] }} + (blockDim.z * blockIdx.z + threadIdx.z);
+    {%- endif %}
+
+    if (i > i_max + {{ step.extents[1] }} || j > j_max + {{ step.extents[3] }}) // || k > k_max + {{ step.extents[5] }})
+        return;
 
     {%- for access in access_vars %}
         {{ access.itype }} {{ access.name }} = 0;
     {%- endfor %}
 
+    {%- if not do_k_parallel %}
     for (int k = k_min + 0; k <= k_max + 0; ++k) {
+    {%- endif %}
     {%- for step in multi.steps %}
           // {{ step.stage_name }}
       {%- for region in step.regions %}
-          if(i >= {{ step.extents[0] }} && i <= i_max + {{ step.extents[1] }} &&
-             j >= {{ step.extents[2] }} && j <= j_max + {{ step.extents[3] }}) {
           {%- for access in access_vars %}
             {%- if step.stage_name in access.stages %}
             {{ access.name }} = {{ access.expr }};
             {%- endif -%}
           {%- endfor %}
           {{ region.body }}
-      }
     {%- endfor %}
     {%- if not loop.last %}
     __syncthreads();
@@ -223,7 +227,9 @@ __global__ void __launch_bounds__({{ max_threads }}) {{ multi.name }}_kernel(
 {%- if tmp_fields %}
     tmp_idx += k_stride_tmp;
 {% endif %}  #}
-  }
+    {%- if not do_k_parallel %}
+    }
+    {%- endif %}
 }
 {% endfor %}
 {% endif -%}
@@ -279,9 +285,10 @@ void run(const std::array<uint_t, ndim>& domain,
 {# --- CUDA --- #}
 {%- if "cuda" in gt_backend %}
     {% for multi in multi_stages %}
-    const uint_t i_size = domain[0] - 2 * i_min;
-    const uint_t j_size = domain[1] - 2 * j_min;
-    const uint_t k_size = domain[2] - 2 * k_min;
+    const uint_t i_size = i_max - i_min + 1;
+    const uint_t j_size = j_max - j_min + 1;
+    const uint_t k_size = k_max - k_min + 1;
+
     const uint_t i_block_size = (i_size + {{ block_sizes[0] }} - 1) / {{ block_sizes[0] }};
     const uint_t j_block_size = ((j_size + {{ block_sizes[1] }}  - 1) / {{ block_sizes[1] }}) * 2 + 1;
 {%- if do_k_parallel %}

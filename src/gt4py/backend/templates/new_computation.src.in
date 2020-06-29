@@ -176,9 +176,9 @@ __constant__ uint_t temp_strides[{{ max_ndim }}];
 {%- endif %}
 {% for multi in multi_stages %}
 __global__ void __launch_bounds__({{ max_threads }}) {{ multi.name }}_kernel(
-    const int i_min, const int i_max, const int i_size,
-    const int j_min, const int j_max, const int j_size,
-    const int k_min, const int k_max, const int k_size,
+    const int i_min, const int i_max,// const int i_size,
+    const int j_min, const int j_max,// const int j_size,
+    const int k_min, const int k_max,// const int k_size,
 {%- set comma = joiner(", ") %}
 {%- for field in arg_fields -%}
     {{- comma() }}
@@ -204,7 +204,11 @@ __global__ void __launch_bounds__({{ max_threads }}) {{ multi.name }}_kernel(
 
     int i, j;
     {%- if not do_k_parallel %}
-    for (int k = k_min + 0; k <= k_max + 0; ++k) {
+{%- if multi.exec == "backward" %}
+    for (int k = k_{{ multi.interval[1].level }} + {{ multi.interval[1].offset }} + {{ multi.steps[0].extents[5] }}; k >= k_{{ multi.interval[0].level }} + {{ multi.interval[0].offset }} + {{ multi.steps[0].extents[4] }}; --k) {
+{%- else %}
+    for (int k = k_{{ multi.interval[0].level }} + {{ multi.interval[0].offset }} + {{ multi.steps[0].extents[4] }}; k <= k_{{ multi.interval[1].level }} + {{ multi.interval[1].offset }} + {{ multi.steps[0].extents[5] }}; ++k) {
+{%- endif %}
     {%- else %}
     int k;
     {%- endif %}
@@ -321,9 +325,9 @@ void run(const std::array<uint_t, ndim>& domain,
 {%- endif %}
 
     {{ multi.name }}_kernel<<<gdim, bdim>>>(
-    i_min, i_max, i_size,
-    j_min, j_max, j_size,
-    k_min, k_max, k_size,
+    i_min, i_max,// i_size,
+    j_min, j_max,// j_size,
+    k_min, k_max,// k_size,
     {%- set comma = joiner(", ") %}
     {%- set extra_indent=4 %}
 {%- for field in arg_fields -%}

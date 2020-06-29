@@ -107,7 +107,7 @@ template <typename DataType = float64_t> struct data_store_t {
 
 template<typename DataType>
 data_store_t<DataType> make_data_store(const BufferInfo& bi,
-                                       const std::array<uint_t, ndim>& compute_domain,
+                                       const std::array<uint_t, ndim>& domain,
                                        const std::array<uint_t, ndim>& origin) {
     // ptr, dims and strides are "outer domain" (i.e., compute domain + halo
     // region). The halo region is only defined through `make_grid` (and
@@ -117,20 +117,20 @@ data_store_t<DataType> make_data_store(const BufferInfo& bi,
     DataType* ptr = static_cast<DataType*>(bi.ptr);
     for (uint_t i = 0; i < ndim; ++i) {
         strides[i] = bi.strides[i] / sizeof(DataType);
-        dims[i] = compute_domain[i]+2*origin[i];
+        dims[i] = domain[i] + 2 * origin[i];
     }
     return data_store_t<DataType>{dims, strides, ptr};
 }
 
 {% if tmp_fields -%}
 template<typename DataType>
-data_store_t<DataType> make_temp_store(const std::array<uint_t, ndim>& compute_domain,
+data_store_t<DataType> make_temp_store(const std::array<uint_t, ndim>& domain,
                                        const std::array<uint_t, ndim>& origin) {
     // Compute dims
     uint_t data_size = 1;
     std::array<uint_t, ndim> dims{};
     for(uint_t i = 0; i < ndim; ++i) {
-      dims[i] = compute_domain[i] + 2 * origin[i];
+      dims[i] = domain[i] + 2 * origin[i];
       data_size *= dims[i];
     }
 

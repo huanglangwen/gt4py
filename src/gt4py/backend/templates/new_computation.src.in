@@ -205,13 +205,13 @@ __global__ void __launch_bounds__({{ max_threads }}) {{ multi.name }}_kernel(
     {%- endfor %}
 
     int i, j, k;
-{%- if multi.exec == "backward" %}
-    for (k = k_{{ multi.interval[1].level }} + {{ multi.interval[1].offset }} + {{ multi.steps[0].extents[5] }} + k_block; k >= k_{{ multi.interval[0].level }} + {{ multi.interval[0].offset }} + {{ multi.steps[0].extents[4] }}; k -= k_inc) {
-{%- else %}
-    for (k = k_{{ multi.interval[0].level }} + {{ multi.interval[0].offset }} + {{ multi.steps[0].extents[4] }} + k_block; k <= k_{{ multi.interval[1].level }} + {{ multi.interval[1].offset }} + {{ multi.steps[0].extents[5] }}; k += k_inc) {
-{%- endif %}
-    {%- for step in multi.steps %}
-        // {{ step.stage_name }}
+{%- for step in multi.steps %}
+    // {{ step.stage_name }}    
+    {%- if multi.exec == "backward" %}
+    for (k = k_{{ multi.interval[1].level }} + {{ multi.interval[1].offset }} + {{ step.extents[5] }} + k_block; k >= k_{{ multi.interval[0].level }} + {{ multi.interval[0].offset }} + {{ step.extents[4] }}; k -= k_inc) {
+    {%- else %}
+    for (k = k_{{ multi.interval[0].level }} + {{ multi.interval[0].offset }} + {{ step.extents[4] }} + k_block; k <= k_{{ multi.interval[1].level }} + {{ multi.interval[1].offset }} + {{ step.extents[5] }}; k += k_inc) {
+    {%- endif %}
       {%- for region in step.regions %}
       for (i = i_min + {{ step.extents[0] }} + i_block; i <= i_max + {{ step.extents[1] }}; i += i_inc) {
         for (j = j_min + {{ step.extents[2] }} + j_block; j <= j_max + {{ step.extents[3] }}; j += j_inc) {
@@ -224,11 +224,12 @@ __global__ void __launch_bounds__({{ max_threads }}) {{ multi.name }}_kernel(
         }
       } 
       {%- endfor %}
+    }
+    {# %- if multi.steps|length > 1 % #}
     {%- if not loop.last %}
     __syncthreads();
     {%- endif -%}
-{%- endfor %}
-    }
+{%- endfor %}    
 }
 {% endfor %}
 {% endif -%}

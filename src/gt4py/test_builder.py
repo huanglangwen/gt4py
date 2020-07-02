@@ -114,7 +114,7 @@ class TestBuilder:
 
         return out_fields
 
-    def write_output(self, out_fields: list, overwrite=False):
+    def write_output(self, out_fields: list, overwrite=True):
         for out_field in out_fields:
             if overwrite or not os.path.exists(out_field["path"]):
                 str_io = io.StringIO()

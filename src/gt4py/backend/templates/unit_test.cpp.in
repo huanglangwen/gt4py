@@ -51,12 +51,14 @@ const std::string test_path = "{{ test_path }}/";
 
 template <typename T>
 bool compare_values(T expected, T actual, T precision) {
-  if(std::fabs(expected) < 1e-3 && std::fabs(actual) < 1e-3) {
-    if(std::fabs(expected - actual) < precision)
-      return true;
-  } else {
-    if(std::fabs((expected - actual) / (precision * expected)) < 1.0)
-      return true;
+  if(!std::isnan(actual)) {
+    if(std::fabs(expected) < 1e-3 && std::fabs(actual) < 1e-3) {
+      if(std::fabs(expected - actual) < precision)
+        return true;
+    } else {
+      if(std::fabs((expected - actual) / (precision * expected)) < 1.0)
+        return true;
+    }
   }
   return false;
 }
@@ -115,7 +117,6 @@ TEST(TestGT4Py, {{ stencil_short_name }}) {
 {% endfor -%}
 {%- endif %}
 
-
 {%- if "cuda" in backend %}
 {% for field in arg_fields -%}
   auto bi_{{ field.name }} = BufferInfo{3, { {{ field.shape[0] }}, {{ field.shape[1] }}, {{ field.shape[2] }} }, { {{ field.stride[0] }}, {{ field.stride[1] }}, {{ field.stride[2] }} }, d_{{ field.name }}};
@@ -163,14 +164,23 @@ cudaMemcpy({{ field.name }}->data(), d_{{ field.name }}, {{ field.size }} * size
   auto {{ field.name }}_out = read_csv<{{ field.dtype }}>(test_path + "data/{{ field.name }}_out.csv");
   if(!{{ field.name }}_out->empty()) {
     ASSERT_EQ({{ field.name }}->size(), {{ field.name }}_out->size());
-    for (int i = 0; i < {{ field.name }}->size(); ++i) {
-      bool matched = compare_values<{{ field.dtype }}>({{ field.name }}_out->at(i), {{ field.name }}->at(i),
+    {% for arg_field in arg_fields -%}
+    {% if field.name == arg_field.name -%}
+    std::array<unsigned, 3> data_strides = { {{ arg_field.stride[0] }} / sizeof({{ arg_field.dtype }}), {{ arg_field.stride[1] }} / sizeof({{ arg_field.dtype }}),
+                                             {{ arg_field.stride[2] }} / sizeof({{ arg_field.dtype }}) };
+    {% endif -%}
+    {% endfor -%}
+    for(int i = {{ field.name }}_origin[0]; i < domain[0] + {{ field.name }}_origin[0]; ++i) {
+      for(int j = {{ field.name }}_origin[1]; j < domain[1] + {{ field.name }}_origin[1]; ++j) {
+        for(int k = {{ field.name }}_origin[2]; k < domain[2] + {{ field.name }}_origin[2]; ++k) {
+          int idx = i * data_strides[0] + j * data_strides[1] + k * data_strides[2];
+      bool matched = compare_values<{{ field.dtype }}>({{ field.name }}_out->at(idx), {{ field.name }}->at(idx),
                                     {{ field.dtype }}_precision);
       if(!matched)
         write_csv<{{ field.dtype }}, {{ field.size }}>(test_path + "data/{{ field.name }}_fail.csv", {{ field.name }});
-      ASSERT_TRUE(matched)  << {{ field.name }}_out->at(i) << " !~ " <<
-                               {{ field.name }}->at(i) << " at " << i;
-    }
+      ASSERT_TRUE(matched)  << {{ field.name }}_out->at(idx) << " !~ " << {{ field.name }}->at(idx)
+                            << " at (" << i << "," << j << "," << k << ")";
+    } } }
   }
 {% endfor -%}
 
@@ -179,5 +189,14 @@ cudaMemcpy({{ field.name }}->data(), d_{{ field.name }}, {{ field.size }} * size
 
   SUCCEED();
 } // TestGT4Py_{{ stencil_short_name }}
+
+#ifndef _GTEST_MAIN_
+int main(int argc, char* argv[]) {
+  // Initialize GTest
+  testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
+} // main
+#define _GTEST_MAIN_
+#endif
 
 } // namespace {{ stencil_unique_name }}_pyext

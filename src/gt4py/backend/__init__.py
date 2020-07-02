@@ -29,9 +29,4 @@ try:
 except ImportError:
     pass  # dawn4py not installed
 
-try:
-    from .mlir_backend import *
-except ImportError:
-    print("WARN: Error importing MLIR backend")
-
 from . import python_generator

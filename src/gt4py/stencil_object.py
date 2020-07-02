@@ -284,7 +284,7 @@ class StencilObject(abc.ABC):
                 self.backend, domain, origin, shapes, field_args, parameter_args
             )
 
-        profile = True
+        profile = False
         if profile and exec_info is None:
             exec_info = dict()
 
@@ -294,7 +294,8 @@ class StencilObject(abc.ABC):
             self.run(
                 _domain_=domain, _origin_=origin, exec_info=exec_info, **field_args, **parameter_args
             )
-            tsum += exec_info["run_end_time"] - exec_info["run_start_time"]
+            if profile:
+                tsum += exec_info["run_end_time"] - exec_info["run_start_time"]
         tavg = tsum / float(nruns)
 
         if exec_info is not None:

@@ -284,24 +284,12 @@ class StencilObject(abc.ABC):
                 self.backend, domain, origin, shapes, field_args, parameter_args
             )
 
-        profile = True
-        if profile and exec_info is None:
-            exec_info = dict()
-
-        nruns = 5 if profile else 1
-        tsum = 0.0
-        for i in range(nruns):
-            self.run(
-                _domain_=domain, _origin_=origin, exec_info=exec_info, **field_args, **parameter_args
-            )
-            tsum += exec_info["run_end_time"] - exec_info["run_start_time"]
-        tavg = tsum / float(nruns)
+        self.run(
+            _domain_=domain, _origin_=origin, exec_info=exec_info, **field_args, **parameter_args
+        )
 
         if exec_info is not None:
             exec_info["call_run_end_time"] = time.perf_counter()
-            if profile:
-                with open("./profile.csv", "a+") as fout:
-                    fout.write("%s,%s,%.10f\n" % (self.options["name"], self.backend, tavg))
 
         if debug_mode:
             test_builder.write_output(out_fields)

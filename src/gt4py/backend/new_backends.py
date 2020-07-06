@@ -72,7 +72,7 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
         max_extents = []
         for pair in tuple(max_extent):
             max_extents.extend(list(pair))
-        if "cuda" in self.backend:
+        if "cuda" in self.gt_backend_t:
             extra_thread_minus = 0  # 1 if max_extents[0] < 0 else 0
             extra_thread_plus = 0  # 1 if max_extents[1] > 0 else 0
             extra_threads = extra_thread_minus + extra_thread_plus
@@ -247,7 +247,7 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
         template_args = dict(
             arg_fields=arg_fields,
             constants=constants,
-            gt_backend=self.backend,
+            gt_backend=self.gt_backend_t,
             halo_sizes=halo_sizes,
             k_axis=k_axis,
             module_name=self.module_name,
@@ -273,7 +273,7 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
 
 
 @gt_backend.register
-class CXXOptBackend(gt_backend.GTCPUBackend):
+class CXXOptBackend(gt_backend.GTX86Backend):
     PYEXT_GENERATOR_CLASS = OptExtGenerator
     GT_BACKEND_T = "x86"
     _CPU_ARCHITECTURE = GT_BACKEND_T

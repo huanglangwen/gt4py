@@ -451,7 +451,7 @@ class BaseDawnBackend(gt_backend.BaseGTBackend):
             if key in _DAWN_TOOLCHAIN_OPTIONS.keys()
         }
         source = dawn4py.compile(
-            sir, groups=pass_groups, backend=dawn_backend, run_with_sync=False, **dawn_opts
+            sir, groups=pass_groups, backend=dawn_backend, disable_k_caches=True, run_with_sync=False, **dawn_opts
         )
         stencil_unique_name = cls.get_pyext_class_name(stencil_id)
         module_name = cls.get_pyext_module_name(stencil_id)

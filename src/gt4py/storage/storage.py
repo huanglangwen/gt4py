@@ -311,6 +311,9 @@ class GPUStorage(Storage):
         ):
             raise Exception("The buffers are in an inconsistent state.")
 
+    def flatten(self):
+        return self.gpu_view.flatten()
+
     def copy(self):
         res = super().copy()
         res.gpu_view[...] = self.gpu_view
@@ -378,6 +381,9 @@ class CPUStorage(Storage):
         ):
             raise Exception("The buffers are in an inconsistent state.")
 
+    def flatten(self):
+        return self.data.flatten()
+
     @property
     def data(self):
         return self.view(np.ndarray)
@@ -427,6 +433,12 @@ class ExplicitlySyncedGPUStorage(Storage):
         obj.default_origin = default_origin
 
         return obj
+
+    def flatten(self):
+        np_data = np.lib.stride_tricks.as_strided(
+                  self.data, shape=self.shape, strides=self.strides
+        )
+        return np_data.flatten()
 
     @property
     def data(self):

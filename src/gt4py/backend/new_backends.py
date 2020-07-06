@@ -116,7 +116,9 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
             stride_name = f"{data_type}_strides"
             strides = [f"(({iter_tuple[i]}) * {stride_name}[{i}])" for i in range(len(iter_tuple))]
             idx_expr = " + ".join(strides)
-            self.access_map_[idx_key] = dict(name=idx_name, expr=idx_expr, itype="int", stages=set())
+            self.access_map_[idx_key] = dict(
+                name=idx_name, expr=idx_expr, itype="int", stages=set()
+            )
 
         self.access_map_[idx_key]["stages"].add(self.curr_stage_)
 

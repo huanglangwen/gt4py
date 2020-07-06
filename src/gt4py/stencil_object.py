@@ -1,12 +1,13 @@
-import sys
 import abc
+import sys
 import time
 import warnings
+
 import numpy as np
+
 import gt4py.backend as gt_backend
 import gt4py.storage as gt_storage
-
-from gt4py.test_builder import TestBuilder
+import gt4py.test_builder as gt_test_builder
 from gt4py.definitions import (
     AccessKind,
     Boundary,
@@ -279,30 +280,17 @@ class StencilObject(abc.ABC):
 
         debug_mode = "debug_mode" in self.options and self.options["debug_mode"]
         if debug_mode:
-            test_builder = TestBuilder(self)
+            test_builder = gt_test_builder.TestBuilder(self)
             out_fields = test_builder.write_test(
                 self.backend, domain, origin, shapes, field_args, parameter_args
             )
 
-        profile = False
-        if profile and exec_info is None:
-            exec_info = dict()
-
-        nruns = 5 if profile else 1
-        tsum = 0.0
-        for i in range(nruns):
-            self.run(
-                _domain_=domain, _origin_=origin, exec_info=exec_info, **field_args, **parameter_args
-            )
-            if profile:
-                tsum += exec_info["run_end_time"] - exec_info["run_start_time"]
-        tavg = tsum / float(nruns)
-
+        self.run(
+            _domain_=domain, _origin_=origin, exec_info=exec_info, **field_args, **parameter_args
+        )
         if exec_info is not None:
             exec_info["call_run_end_time"] = time.perf_counter()
-            if profile:
-                with open("./profile.csv", "a+") as fout:
-                    fout.write("%s,%s,%.10f\n" % (self.options["name"], self.backend, tavg))
 
         if debug_mode:
             test_builder.write_output(out_fields)
+

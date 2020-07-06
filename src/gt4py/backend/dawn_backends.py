@@ -303,9 +303,9 @@ for name in dir(dawn4py.CodeGenOptions) + dir(dawn4py.OptimizerOptions):
 _DAWN_BACKEND_OPTIONS = {**_DAWN_BASE_OPTIONS, **_DAWN_TOOLCHAIN_OPTIONS}
 
 
-class DawnPyModuleGenerator(gt_backend.GTPyModuleGenerator):
-    def __init__(self, backend_class, options):
-        super().__init__(backend_class, options)
+class DawnPyModuleGenerator(gt_backend.PyExtModuleGenerator):
+    def __init__(self, backend_class):
+        super().__init__(backend_class)
 
     def generate_implementation(self):
         sources = gt_text.TextBlock(
@@ -353,7 +353,7 @@ cupy.cuda.Device(0).synchronize()
         return sources.text
 
 
-class BaseDawnBackend(gt_backend.BaseGTBackend):
+class BaseDawnBackend(gt_backend.BasePyExtBackend):
 
     DAWN_BACKEND_NS = None
     DAWN_BACKEND_NAME = None
@@ -361,7 +361,7 @@ class BaseDawnBackend(gt_backend.BaseGTBackend):
 
     GT_BACKEND_T = None
 
-    GENERATOR_CLASS = DawnPyModuleGenerator
+    MODULE_GENERATOR_CLASS = DawnPyModuleGenerator
 
     PYEXT_GENERATOR_CLASS = gt_backend.GTPyExtGenerator
 
@@ -402,14 +402,22 @@ class BaseDawnBackend(gt_backend.BaseGTBackend):
             stencil_id, definition_ir, options, **kwargs
         )
 
-        # Generate and return the Python wrapper class
-        extra_cache_info = {
-            "pyext_module_name": pyext_module_name,
-            "pyext_file_path": pyext_file_path,
-        }
+        if not options._impl_opts.get("disable-code-generation", False):
+            implementation_ir = (
+                kwargs["implementation_ir"] if "implementation_ir" in kwargs else None
+            )
+            if implementation_ir is None:
+                implementation_ir = gt_analysis.transform(definition_ir, options)
 
         return cls._generate_module(
-            stencil_id, definition_ir, definition_func, options, extra_cache_info, **kwargs
+            stencil_id,
+            definition_ir,
+            definition_func,
+            options,
+            extra_cache_info={"pyext_file_path": pyext_file_path},
+            implementation_ir=implementation_ir,
+            pyext_module_name=pyext_module_name,
+            pyext_file_path=pyext_file_path,
         )
 
     @classmethod
@@ -527,44 +535,24 @@ class BaseDawnBackend(gt_backend.BaseGTBackend):
         qualified_pyext_name = cls.get_pyext_module_name(stencil_id, qualified=True)
 
         if uses_cuda:
-            module_name, file_path = pyext_builder.build_gtcuda_ext(
+            module_name, file_path = pyext_builder.build_pybind_cuda_ext(
                 qualified_pyext_name,
                 sources=sources,
                 build_path=pyext_build_path,
                 target_path=pyext_target_path,
-                extra_include_dirs=pyext_extra_include_dirs,
                 **pyext_build_opts,
             )
         else:
-            module_name, file_path = pyext_builder.build_gtcpu_ext(
+            module_name, file_path = pyext_builder.build_pybind_ext(
                 qualified_pyext_name,
                 sources=sources,
                 build_path=pyext_build_path,
                 target_path=pyext_target_path,
-                extra_include_dirs=pyext_extra_include_dirs,
                 **pyext_build_opts,
             )
         assert module_name == qualified_pyext_name
 
         return module_name, file_path
-
-    @classmethod
-    def _generate_module(
-        cls, stencil_id, definition_ir, definition_func, options, extra_cache_info, **kwargs
-    ):
-        if options.dev_opts.get("code-generation", True):
-            implementation_ir = (
-                kwargs["implementation_ir"] if "implementation_ir" in kwargs else None
-            )
-            if implementation_ir is None:
-                implementation_ir = gt_analysis.transform(definition_ir, options)
-
-        generator_options = options.as_dict()
-        generator_options.update(extra_cache_info)
-
-        return super(BaseDawnBackend, cls)._generate_module(
-            stencil_id, implementation_ir, definition_func, generator_options, extra_cache_info
-        )
 
     @classmethod
     def _generic_generate_extension(
@@ -573,7 +561,7 @@ class BaseDawnBackend(gt_backend.BaseGTBackend):
         dawn_src_file = f"_dawn_{stencil_id.qualified_name.split('.')[-1]}.hpp"
 
         # Generate source
-        if options.dev_opts.get("code-generation", True):
+        if not options._impl_opts.get("disable-code-generation", False):
             gt_pyext_sources = cls.generate_extension_sources(
                 stencil_id, definition_ir, options, cls.GT_BACKEND_T
             )
@@ -593,22 +581,23 @@ class BaseDawnBackend(gt_backend.BaseGTBackend):
         pyext_opts = dict(
             verbose=options.backend_opts.get("verbose", False),
             clean=options.backend_opts.get("clean", False),
-            debug_mode=options.backend_opts.get("debug_mode", False),
-            add_profile_info=options.backend_opts.get("add_profile_info", False),
+            **pyext_builder.get_gt_pyext_build_opts(
+                debug_mode=options.backend_opts.get("debug_mode", False),
+                add_profile_info=options.backend_opts.get("add_profile_info", False),
+                uses_cuda=uses_cuda,
+            ),
         )
-        include_dirs = [
-            "{install_dir}/_external_src".format(
-                install_dir=os.path.dirname(inspect.getabsfile(dawn4py))
-            )
-        ]
+
+        pyext_opts["include_dirs"].extend(
+            [
+                "{install_dir}/_external_src".format(
+                    install_dir=os.path.dirname(inspect.getabsfile(dawn4py))
+                )
+            ]
+        )
 
         return cls.build_extension_module(
-            stencil_id,
-            gt_pyext_sources,
-            pyext_opts,
-            pyext_extra_include_dirs=include_dirs,
-            uses_cuda=uses_cuda,
-            **kwargs,
+            stencil_id, gt_pyext_sources, pyext_opts, uses_cuda=uses_cuda, **kwargs
         )
 
     @classmethod

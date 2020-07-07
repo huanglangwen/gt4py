@@ -257,6 +257,7 @@ class SIRConverter(gt_ir.IRNodeVisitor):
             field
             for field in fields
             if not field.is_temporary
+            and field.name in accesses
             and accesses[field.name] == gt_definitions.AccessKind.READ_WRITE
         ]
 

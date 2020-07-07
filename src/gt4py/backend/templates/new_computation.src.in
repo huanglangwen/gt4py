@@ -284,35 +284,36 @@ void run(const std::array<uint_t, ndim>& domain,
 
 {# --- CUDA --- #}
 {%- if "cuda" in gt_backend %}
-    {% for multi in multi_stages %}
+{% for multi in multi_stages %}
+    {
     const uint_t i_size = i_max - i_min + 1;
     const uint_t j_size = j_max - j_min + 1;
     const uint_t k_size = k_max - k_min + 1;
 
     const uint_t i_block_size = (i_size + {{ block_sizes[0] }} - 1) / {{ block_sizes[0] }};
     const uint_t j_block_size = ((j_size + {{ block_sizes[1] }}  - 1) / {{ block_sizes[1] }}) * 2 + 1;
-{%- if do_k_parallel %}
+    {%- if do_k_parallel %}
     const uint_t k_block_size = ((domain[2] + {{ block_sizes[2] }} - 1) / {{ block_sizes[2] }}) / 4;
-{%- else %}
+    {%- else %}
     const uint_t k_block_size = 1;
-{%- endif %}
+    {%- endif %}
 
     dim3 gdim(i_block_size, j_block_size, k_block_size);
     dim3 bdim({{ block_sizes[0] }}, {{ block_sizes[1] }} + {{ extra_threads }}, 1);
-{%- if debug %}
+    {%- if debug %}
     printf("DEBUG: gdim = (%d,%d,%d)\n", i_block_size, j_block_size, k_block_size);
     printf("DEBUG: bdim = (%d,%d,%d)\n", {{ block_sizes[0] }}, {{ block_sizes[1] }} + {{ extra_threads }}, 1);
-{%- endif %}
+    {%- endif %}
     cudaMemcpyToSymbol(data_strides, {{ arg_fields[0].name }}_ds.strides.data(), sizeof(uint_t) * ndim);
-{%- if debug %}
+    {%- if debug %}
     printf("DEBUG: data_strides = (%d,%d,%d)\n", {{ arg_fields[0].name }}_ds.strides[0], {{ arg_fields[0].name }}_ds.strides[1], {{ arg_fields[0].name }}_ds.strides[2]);
-{%- endif %}
-{%- if tmp_fields %}
+    {%- endif %}
+    {%- if tmp_fields %}
     cudaMemcpyToSymbol(temp_strides, {{ tmp_fields[0].name }}_ds.strides.data(), sizeof(uint_t) * ndim);
-{%- if debug %}
+    {%- if debug %}
     printf("DEBUG: temp_strides = (%d,%d,%d)\n", {{ tmp_fields[0].name }}_ds.strides[0], {{ tmp_fields[0].name }}_ds.strides[1], {{ tmp_fields[0].name }}_ds.strides[2]);
-{%- endif %}
-{%- endif %}
+    {%- endif %}
+    {%- endif %}
 
     {{ multi.name }}_kernel<<<gdim, bdim>>>(
     i_min, i_max,
@@ -320,20 +321,21 @@ void run(const std::array<uint_t, ndim>& domain,
     k_min, k_max,
     {%- set comma = joiner(", ") %}
     {%- set extra_indent=4 %}
-{%- for field in arg_fields -%}
+    {%- for field in arg_fields -%}
     {{- comma() }}
     {{ field.name }}
-{%- endfor %}
-{%- for field in tmp_fields %}
+    {%- endfor %}
+    {%- for field in tmp_fields %}
     {{- comma() }}
     {{ field.name }}
-{%- endfor %}
-{%- for param in parameters %}
+    {%- endfor %}
+    {%- for param in parameters %}
     {{- comma() }}
     {{ param.name }}
-{%- endfor %});
-{%- set extra_indent=0 %}
-    {% endfor %}
+    {%- endfor %});
+    {%- set extra_indent=0 %}
+    }
+{% endfor %}
 {# --- C++ --- #}
 {%- else %}
     const auto data_strides = {{ arg_fields[0].name }}_ds.strides;

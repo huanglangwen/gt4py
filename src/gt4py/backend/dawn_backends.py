@@ -27,7 +27,6 @@ import jinja2
 import numpy as np
 
 from typing import List, Dict, Type
-from collections import OrderedDict
 
 import dawn4py
 from dawn4py.serialization import SIR
@@ -252,7 +251,6 @@ class SIRConverter(gt_ir.IRNodeVisitor):
         global_variables = self._make_global_variables(node.parameters, node.externals)
 
         fields, accesses = FieldDeclCollector.apply(node)
-
         out_fields = [
             field
             for field in fields
@@ -342,16 +340,35 @@ pyext_module.run_computation(list(_domain_), {run_args}, exec_info)
             none_checks="\n".join(none_checks),
             run_args=", ".join(args),
         )
-        if self.backend_name.endswith("cuda"):
-            source = (
-                source
-                + """import cupy
-cupy.cuda.Device(0).synchronize()
-"""
-            )
         sources.extend(source.splitlines())
 
         return sources.text
+
+
+class DawnCUDAPyModuleGenerator(DawnPyModuleGenerator):
+    def __init__(self, backend_class):
+        super().__init__(backend_class)
+
+    def generate_implementation(self):
+        source = super().generate_implementation()
+        return source + (
+            """
+import cupy
+cupy.cuda.Device(0).synchronize()
+"""
+        )
+
+    def generate_pre_run(self) -> str:
+        field_names = self.module_info["field_info"].keys()
+        return "\n".join([f + ".host_to_device()" for f in field_names])
+
+    def generate_post_run(self) -> str:
+        output_field_names = [
+            name
+            for name, info in self.module_info["field_info"].items()
+            if info.access == gt_definitions.AccessKind.READ_WRITE
+        ]
+        return "\n".join([f + "._set_device_modified()" for f in output_field_names])
 
 
 class BaseDawnBackend(gt_backend.BasePyExtBackend):
@@ -459,13 +476,9 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
             for key, value in backend_opts.items()
             if key in _DAWN_TOOLCHAIN_OPTIONS.keys()
         }
+        dawn_opts["disable_k_caches"] = True
         source = dawn4py.compile(
-            sir,
-            groups=pass_groups,
-            backend=dawn_backend,
-            disable_k_caches=True,
-            run_with_sync=False,
-            **dawn_opts,
+            sir, groups=pass_groups, backend=dawn_backend, run_with_sync=False, **dawn_opts
         )
         stencil_unique_name = cls.get_pyext_class_name(stencil_id)
         module_name = cls.get_pyext_module_name(stencil_id)
@@ -653,6 +666,7 @@ class DawnGTCUDABackend(BaseDawnBackend):
 
     DAWN_BACKEND_NS = "gt"
     DAWN_BACKEND_NAME = "GridTools"
+    MODULE_GENERATOR_CLASS = DawnCUDAPyModuleGenerator
     GT_BACKEND_T = "cuda"
 
     name = "dawn:gtcuda"
@@ -707,6 +721,7 @@ class DawnCUDABackend(BaseDawnBackend):
 
     DAWN_BACKEND_NS = "cuda"
     DAWN_BACKEND_NAME = "CUDA"
+    MODULE_GENERATOR_CLASS = DawnCUDAPyModuleGenerator
     GT_BACKEND_T = "cuda"
 
     name = "dawn:cuda"

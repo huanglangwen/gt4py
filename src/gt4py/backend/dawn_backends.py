@@ -27,6 +27,7 @@ import jinja2
 import numpy as np
 
 from typing import List, Dict, Type
+from collections import OrderedDict
 
 import dawn4py
 from dawn4py.serialization import SIR

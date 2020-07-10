@@ -463,7 +463,6 @@ class BaseModuleGenerator(abc.ABC):
         definition_ir: gt_ir.StencilDefinition,
         options: gt_definitions.BuildOptions,
         module_info: Optional[Dict[str, Any]] = None,
-        numpy_module: str = "numpy",
         **kwargs,
     ) -> str:
 
@@ -497,6 +496,7 @@ class BaseModuleGenerator(abc.ABC):
             class_name=self.stencil_class_name,
             class_members=class_members,
             docstring=module_info["docstring"],
+            backend=self.backend_name,
             gt_backend=self.backend_name,
             gt_source=module_info["sources"],
             gt_domain_info=module_info["domain_info"],
@@ -509,7 +509,6 @@ class BaseModuleGenerator(abc.ABC):
             param_names=module_info["parameter_info"].keys(),
             pre_run=pre_run,
             post_run=post_run,
-            numpy_module=numpy_module,
             implementation=implementation,
         )
         module_source = gt_utils.text.format_source(

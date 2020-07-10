@@ -15,6 +15,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 import numpy as np
+import copy
 
 from gt4py import backend as gt_backend
 from gt4py import ir as gt_ir
@@ -345,3 +346,15 @@ class NumPyBackend(gt_backend.BaseBackend):
     }
 
     MODULE_GENERATOR_CLASS = NumPyModuleGenerator
+
+
+@gt_backend.register
+class BohriumBackend(NumPyBackend):
+    name = "bohrium"
+
+
+@gt_backend.register
+class CuPyBackend(NumPyBackend):
+    name = "cupy"
+    storage_info = copy.deepcopy(NumPyBackend.storage_info)
+    storage_info["device"] = "gpu"

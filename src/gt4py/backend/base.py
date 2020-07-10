@@ -463,6 +463,7 @@ class BaseModuleGenerator(abc.ABC):
         definition_ir: gt_ir.StencilDefinition,
         options: gt_definitions.BuildOptions,
         module_info: Optional[Dict[str, Any]] = None,
+        numpy_module: str = "numpy",
         **kwargs,
     ) -> str:
 
@@ -508,6 +509,7 @@ class BaseModuleGenerator(abc.ABC):
             param_names=module_info["parameter_info"].keys(),
             pre_run=pre_run,
             post_run=post_run,
+            numpy_module=numpy_module,
             implementation=implementation,
         )
         module_source = gt_utils.text.format_source(

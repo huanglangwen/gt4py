@@ -295,15 +295,6 @@ _DAWN_BASE_OPTIONS = {
     "no_opt": {"versioning": False},
 }
 
-        if definition_ir.externals:
-            info["gt_constants"] = {
-                name: repr(value)
-                for name, value in definition_ir.externals.items()
-                if isinstance(value, numbers.Number)
-            }
-        else:
-            info["gt_constants"] = {}
-
 _DAWN_TOOLCHAIN_OPTIONS = {}
 for name in dir(dawn4py.CodeGenOptions) + dir(dawn4py.OptimizerOptions):
     if (

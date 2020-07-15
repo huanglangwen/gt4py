@@ -76,11 +76,12 @@ std::unique_ptr<std::vector<T>> read_csv(const std::string& csv_file) {
   return data;
 }
 
-template <typename T, unsigned N>
-void write_csv(const std::string& csv_file, const std::unique_ptr<std::array<T, N>>& data) {
+template <typename T>
+void write_csv(const std::string& csv_file, const std::unique_ptr<std::vector<T>>& data) {
   std::ofstream fout(csv_file);
   if(fout.is_open()) {
     fout.precision(18);
+    const unsigned N = data->size();
     for(int i = 0; i < N; ++i) {
       fout << std::scientific << data->at(i);
       if(i < N - 1)
@@ -103,9 +104,7 @@ TEST(TestGT4Py, {{ stencil_short_name }}) {
 
 
 {% for field in arg_fields -%}
-  std::unique_ptr<std::array<{{ field.dtype }}, {{ field.size }}>> {{ field.name }}(new std::array<{{ field.dtype }}, {{ field.size }}>{
-  #include "data/{{ field.name }}.csv"
-  });
+  auto {{ field.name }} = read_csv<{{ field.dtype }}>(test_path + "data/{{ field.name }}.csv");
 {% endfor -%}
 
 
@@ -177,7 +176,7 @@ cudaMemcpy({{ field.name }}->data(), d_{{ field.name }}, {{ field.size }} * size
       bool matched = compare_values<{{ field.dtype }}>({{ field.name }}_out->at(idx), {{ field.name }}->at(idx),
                                     {{ field.dtype }}_precision);
       if(!matched)
-        write_csv<{{ field.dtype }}, {{ field.size }}>(test_path + "data/{{ field.name }}_fail.csv", {{ field.name }});
+        write_csv<{{ field.dtype }}>(test_path + "data/{{ field.name }}_fail.csv", {{ field.name }});
       ASSERT_TRUE(matched)  << {{ field.name }}_out->at(idx) << " !~ " << {{ field.name }}->at(idx)
                             << " at (" << i << "," << j << "," << k << ")";
     } } }

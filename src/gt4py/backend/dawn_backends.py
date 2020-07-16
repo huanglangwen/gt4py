@@ -552,6 +552,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
                 )
         else:
             pass_groups = dawn4py.default_pass_groups()
+            pass_groups.append(dawn4py.PassGroup.MultiStageMerger)
 
         # If present, parse backend string
         dawn_backend = DAWN_CODEGEN_BACKENDS[cls.DAWN_BACKEND_NAME or "GridTools"]
@@ -561,7 +562,8 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
             for key, value in backend_opts.items()
             if key in _DAWN_TOOLCHAIN_OPTIONS.keys()
         }
-        dawn_opts["disable_k_caches"] = True
+        #dawn_opts["disable_k_caches"] = True
+
         source = dawn4py.compile(
             sir, groups=pass_groups, backend=dawn_backend, run_with_sync=False, **dawn_opts
         )

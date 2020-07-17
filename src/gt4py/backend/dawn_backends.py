@@ -246,6 +246,7 @@ class SIRConverter(gt_ir.IRNodeVisitor):
 
     def visit_ComputationBlock(self, node: gt_ir.ComputationBlock, **kwargs):
         interval = self.visit(node.interval)
+
         body_ast = sir_utils.make_ast(self.visit(node.body, make_block=False))
 
         loop_order = (
@@ -272,7 +273,6 @@ class SIRConverter(gt_ir.IRNodeVisitor):
         stencil_ast = sir_utils.make_ast(
             [self.visit(computation) for computation in node.computations]
         )
-
         name = node.name.split(".")[-1]
         stencils.append(sir_utils.make_stencil(name=name, ast=stencil_ast, fields=fields))
 
@@ -294,6 +294,7 @@ _DAWN_BASE_OPTIONS = {
     "verbose": {"versioning": False},
     "no_opt": {"versioning": False},
 }
+
 
 _DAWN_TOOLCHAIN_OPTIONS = {}
 for name in dir(dawn4py.CodeGenOptions) + dir(dawn4py.OptimizerOptions):
@@ -563,7 +564,6 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
             if key in _DAWN_TOOLCHAIN_OPTIONS.keys()
         }
         #dawn_opts["disable_k_caches"] = True
-
         source = dawn4py.compile(
             sir, groups=pass_groups, backend=dawn_backend, run_with_sync=False, **dawn_opts
         )

@@ -68,10 +68,14 @@ def zeros(backend, default_origin, shape, dtype, mask=None, *, managed_memory=Fa
 def from_array(
     data, backend, default_origin, shape=None, dtype=None, mask=None, *, managed_memory=False
 ):
+    if cp is not None and isinstance(data, cp.ndarray):
+        xp = cp
+    else:
+        xp = np
     if shape is None:
-        shape = np.asarray(data).shape
+        shape = xp.asarray(data).shape
     if dtype is None:
-        dtype = np.asarray(data).dtype
+        dtype = xp.asarray(data).dtype
     storage = empty(
         shape=shape,
         dtype=dtype,

@@ -17,7 +17,6 @@ class TestBuilder:
         backend: str,
         domain: tuple,
         origins: dict,
-        shapes: dict,
         field_args: dict,
         parameter_args: dict,
         out_indices=[],
@@ -57,6 +56,8 @@ class TestBuilder:
                     if field_arg in origins
                 ]
 
+        shapes = {name: Shape(field.shape) for name, field in field_args.items()}
+
         for field_idx, field_arg in enumerate(field_args):
             field = field_args[field_arg]
             str_io = io.StringIO()
@@ -66,7 +67,7 @@ class TestBuilder:
             data_file = open(data_path, "w")
             data_file.write(str_io.getvalue().rstrip().replace("\n", ","))
 
-            if field_arg in origins and field_arg in shapes:
+            if field_arg in origins:
                 arg_fields.append(
                     dict(
                         name=field_arg,

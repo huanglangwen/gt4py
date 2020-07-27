@@ -4,6 +4,7 @@ import os
 import jinja2
 import numpy as np
 import gt4py.backend as gt_backend
+import gt4py.definitions as gt_definitions
 
 
 class TestBuilder:
@@ -56,7 +57,7 @@ class TestBuilder:
                     if field_arg in origins
                 ]
 
-        shapes = {name: Shape(field.shape) for name, field in field_args.items()}
+        shapes = {name: gt_definitions.Shape(field.shape) for name, field in field_args.items()}
 
         for field_idx, field_arg in enumerate(field_args):
             field = field_args[field_arg]

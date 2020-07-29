@@ -269,6 +269,12 @@ class SIRConverter(gt_ir.IRNodeVisitor):
         field_info = FieldInfoCollector.apply(node)
         self._update_field_extents(field_info)
         fields = [field_info[field_name]["field_decl"] for field_name in field_info]
+        outputs = [
+            field_info[field_name]
+            for field_name in field_info
+            if field_info[field_name]["access"] == gt_definitions.AccessKind.READ_WRITE
+            and not field_info[field_name]["field_decl"].is_temporary
+        ]
 
         stencil_ast = sir_utils.make_ast(
             [self.visit(computation) for computation in node.computations]
@@ -563,7 +569,7 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
             for key, value in backend_opts.items()
             if key in _DAWN_TOOLCHAIN_OPTIONS.keys()
         }
-        #dawn_opts["disable_k_caches"] = True
+        dawn_opts["disable_k_caches"] = False
         source = dawn4py.compile(
             sir, groups=pass_groups, backend=dawn_backend, run_with_sync=False, **dawn_opts
         )

@@ -209,6 +209,8 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
 
                     # Force a new multi-stage when intervals change...
                     if len(last_interval) > 0 and interval != last_interval:
+                        if last_interval[1]["level"] == "min":
+                            last_interval[1]["offset"] -= 1
                         multi_stages.append(
                             {
                                 "name": f"{multi_stage.name}_{n_multi_stages}",

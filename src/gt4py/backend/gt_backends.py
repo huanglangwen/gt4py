@@ -19,6 +19,7 @@ import functools
 import numbers
 import os
 import types
+from typing import Optional
 
 import jinja2
 import numpy as np
@@ -434,10 +435,18 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
             if name not in node.unreferenced
         ]
 
+        stage_extents = {}
         stage_functors = {}
         for multi_stage in node.multi_stages:
             for group in multi_stage.groups:
                 for stage in group.stages:
+                    compute_extent = stage.compute_extent
+                    extents = []
+                    for i in range(compute_extent.ndims - 1):
+                        extents.extend(
+                            (compute_extent.lower_indices[i], compute_extent.upper_indices[i])
+                        )
+                    stage_extents[stage.name] = ", ".join([str(extent) for extent in extents])
                     stage_functors[stage.name] = self.visit(stage)
 
         multi_stages = []
@@ -455,6 +464,7 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
             multi_stages=multi_stages,
             parameters=parameters,
             stage_functors=stage_functors,
+            stage_extents=stage_extents,
             stencil_unique_name=self.class_name,
             tmp_fields=tmp_fields,
         )
@@ -466,7 +476,7 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
         return sources
 
 
-class BaseGTBackend(gt_backend.BasePyExtBackend):
+class BaseGTBackend(gt_backend.BasePyExtBackend, gt_backend.CLIBackendMixin):
 
     GT_BACKEND_OPTS = {
         "add_profile_info": {"versioning": True},
@@ -523,13 +533,9 @@ class BaseGTBackend(gt_backend.BasePyExtBackend):
 
         # Generate source
         if not options._impl_opts.get("disable-code-generation", False):
-            gt_pyext_generator = cls.PYEXT_GENERATOR_CLASS(
-                cls.get_pyext_class_name(stencil_id),
-                cls.get_pyext_module_name(stencil_id),
-                cls.GT_BACKEND_T,
-                options,
+            gt_pyext_sources = cls._generate_computation_src(
+                implementation_ir, options, stencil_id=stencil_id
             )
-            gt_pyext_sources = gt_pyext_generator(implementation_ir)
         else:
             # Pass NOTHING to the builder means try to reuse the source code files
             gt_pyext_sources = {key: gt_utils.NOTHING for key in cls.TEMPLATE_FILES.keys()}
@@ -555,6 +561,38 @@ class BaseGTBackend(gt_backend.BasePyExtBackend):
         return cls.build_extension_module(
             stencil_id, gt_pyext_sources, pyext_opts, uses_cuda=uses_cuda
         )
+
+    @classmethod
+    def _generate_computation_src(
+        cls, implementation_ir, options, *, stencil_id: Optional[gt_definitions.StencilID]
+    ):
+        """Generate the source for the stencil independently from use case."""
+        class_name = cls.get_pyext_class_name(stencil_id) if stencil_id else options.name
+        module_name = (
+            cls.get_pyext_module_name(stencil_id) if stencil_id else f"{options.name}_pyext"
+        )
+        gt_pyext_generator = cls.PYEXT_GENERATOR_CLASS(
+            class_name, module_name, cls.GT_BACKEND_T, options
+        )
+        return gt_pyext_generator(implementation_ir)
+
+    @classmethod
+    def generate_computation(
+        cls,
+        definition_ir: gt_ir.StencilDefinition,
+        options: gt_definitions.BuildOptions,
+        *,
+        stencil_id: Optional[gt_definitions.StencilID] = None,
+        **kwargs,
+    ):
+        implementation_ir = kwargs.get(
+            "implementation_ir", gt_analysis.transform(definition_ir, options)
+        )
+        dir_name = f"{options.name}_src"
+        src_files = cls._generate_computation_src(
+            implementation_ir, options, stencil_id=stencil_id
+        )
+        return {dir_name: src_files}
 
     @classmethod
     @abc.abstractmethod

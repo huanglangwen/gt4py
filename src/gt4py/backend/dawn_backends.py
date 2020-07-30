@@ -728,6 +728,7 @@ class DawnGTX86Backend(BaseDawnBackend):
     name = "dawn:gtx86"
     options = _DAWN_BACKEND_OPTIONS
     storage_info = gt_backend.GTX86Backend.storage_info
+    languages = gt_backend.GTX86Backend.languages
 
     @classmethod
     def generate_extension(cls, stencil_id, definition_ir, options, **kwargs):
@@ -746,6 +747,7 @@ class DawnGTMCBackend(BaseDawnBackend):
     name = "dawn:gtmc"
     options = _DAWN_BACKEND_OPTIONS
     storage_info = gt_backend.GTMCBackend.storage_info
+    languages = gt_backend.GTMCBackend.languages
 
     @classmethod
     def generate_extension(cls, stencil_id, definition_ir, options, **kwargs):
@@ -765,6 +767,7 @@ class DawnGTCUDABackend(BaseDawnBackend):
     name = "dawn:gtcuda"
     options = _DAWN_BACKEND_OPTIONS
     storage_info = gt_backend.GTCUDABackend.storage_info
+    languages = gt_backend.GTCUDABackend.languages
 
     @classmethod
     def generate_extension(cls, stencil_id, definition_ir, options, **kwargs):
@@ -783,6 +786,7 @@ class DawnNaiveBackend(BaseDawnBackend):
     name = "dawn:naive"
     options = _DAWN_BACKEND_OPTIONS
     storage_info = gt_backend.GTX86Backend.storage_info
+    languages = gt_backend.GTX86Backend.languages
 
     @classmethod
     def generate_extension(cls, stencil_id, definition_ir, options, **kwargs):
@@ -801,6 +805,7 @@ class DawnOptBackend(BaseDawnBackend):
     name = "dawn:cxxopt"
     options = _DAWN_BACKEND_OPTIONS
     storage_info = gt_backend.GTX86Backend.storage_info
+    languages = gt_backend.GTX86Backend.languages
 
     @classmethod
     def generate_extension(cls, stencil_id, definition_ir, options, **kwargs):
@@ -820,6 +825,7 @@ class DawnCUDABackend(BaseDawnBackend):
     name = "dawn:cuda"
     options = _DAWN_BACKEND_OPTIONS
     storage_info = gt_backend.GTCUDABackend.storage_info
+    languages = gt_backend.GTCUDABackend.languages
 
     @classmethod
     def generate_extension(cls, stencil_id, definition_ir, options, **kwargs):

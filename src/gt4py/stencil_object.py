@@ -204,7 +204,7 @@ class StencilObject(abc.ABC):
                 )
 
     def _call_run(
-        self, field_args, parameter_args, domain, origin, exec_info=None, checks_on=False
+        self, field_args, parameter_args, domain, origin, exec_info=None, validate_args=False
     ):
         """Check and preprocess the provided arguments (called by :class:`StencilObject` subclasses).
 
@@ -290,7 +290,7 @@ class StencilObject(abc.ABC):
         else:
             domain = normalize_domain(domain)
 
-        if checks_on:
+        if validate_args:
             self._validate_args(used_field_args, used_param_args, domain, origin, exec_info)
 
         debug_mode = "debug_mode" in self.options and self.options["debug_mode"]

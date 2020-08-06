@@ -18,8 +18,8 @@ import numpy as np
 import copy
 
 from gt4py import backend as gt_backend
-from gt4py import ir as gt_ir
 from gt4py import definitions as gt_definitions
+from gt4py import ir as gt_ir
 from gt4py.utils import text as gt_text
 
 from .python_generator import PythonSourceGenerator

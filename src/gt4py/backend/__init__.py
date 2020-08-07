@@ -14,13 +14,24 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-from .concepts import *
+# Disable isort to avoid circular imports
+# isort: off
+from .base import *
+from . import python_generator
+
+# isort: on
 
 from .debug_backend import *
+from .gt_backends import *
 from .numpy_backend import *
-from .base_gt_backend import *
-from .gt_cpu_backend import *
-from .gt_cuda_backend import *
+
+
+try:
+    import dawn4py
+
+    from .dawn_backends import *
+except ImportError:
+    pass  # dawn4py not installed
 
 try:
     import dawn4py

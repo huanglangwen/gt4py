@@ -21,13 +21,14 @@
 # Version tag from setuptools_scm
 from pkg_resources import get_distribution
 
+
 full_version = get_distribution("gt4py").version
 
 
 # -- Project information -----------------------------------------------------
 
 project = "GT4Py"
-copyright = "2019, CSCS"
+copyright = "2014-2020, ETH Zurich"
 author = "ETH Zurich"
 
 # The short X.Y version
@@ -49,7 +50,7 @@ extensions = [
     # 'sphinx.ext.coverage',
     "sphinx.ext.doctest",
     # "sphinx.ext.intersphinx",
-    # 'sphinx.ext.mathjax',
+    "sphinx.ext.mathjax",
     "sphinx.ext.napoleon",
     # "sphinx.ext.todo",
     "sphinx.ext.viewcode",
@@ -188,6 +189,7 @@ autodoc_default_options = {
     # "member-order": "bysource",
     "special-members": "__call__"
 }
+autodoc_mock_imports = ["dawn4py"]
 
 # -- Options for intersphinx extension ---------------------------------------
 # intersphinx_mapping = {

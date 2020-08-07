@@ -14,13 +14,14 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-import types
-import numpy as np
 import collections
+import numbers
+import types
+
 import hypothesis as hyp
 import hypothesis.strategies as hyp_st
+import numpy as np
 from hypothesis.extra import numpy as hyp_np
-import numbers
 
 
 # ---- Test Suites utilities ----
@@ -182,7 +183,7 @@ def draw_from_strategies(draw, strategies):
     Parameters
     ----------
     draw : `function`
-        Hypothesis :function:`draw` implementation.
+        Hypothesis :func:`draw` implementation.
     strategies : `dict`
         Named strategies.
         - ``name``: Hypothesis strategy (`function`).

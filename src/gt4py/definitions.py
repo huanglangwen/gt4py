@@ -21,15 +21,11 @@ import numbers
 import operator
 
 from gt4py import utils as gt_utils
-from gt4py.utils.attrib import (
-    attribute,
-    attribclass,
-    attribkwclass,
-    Any,
-    Dict as DictOf,
-    List as ListOf,
-    Tuple as TupleOf,
-)
+from gt4py.utils.attrib import Any, AttributeClassLike
+from gt4py.utils.attrib import Dict as DictOf
+from gt4py.utils.attrib import List as ListOf
+from gt4py.utils.attrib import Tuple as TupleOf
+from gt4py.utils.attrib import attribclass, attribkwclass, attribute
 
 
 class CartesianSpace:
@@ -657,7 +653,7 @@ class ParameterInfo(collections.namedtuple("ParameterInfoNamedTuple", ["dtype"])
 
 
 @attribkwclass
-class BuildOptions:
+class BuildOptions(AttributeClassLike):
     """Build options."""
 
     name = attribute(of=str)
@@ -665,7 +661,7 @@ class BuildOptions:
     backend_opts = attribute(of=DictOf[str, Any], factory=dict)
     build_info = attribute(of=dict, optional=True)
     rebuild = attribute(of=bool, default=False)
-    dev_opts = attribute(of=DictOf[str, bool], factory=dict)
+    _impl_opts = attribute(of=DictOf[str, Any], factory=dict)
 
     @property
     def qualified_name(self):
@@ -682,7 +678,7 @@ class BuildOptions:
 
 
 @attribclass(frozen=True)
-class StencilID:
+class StencilID(AttributeClassLike):
     qualified_name = attribute(of=str)
     version = attribute(of=str)
 

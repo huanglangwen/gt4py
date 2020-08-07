@@ -14,13 +14,14 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-import numpy as np
-import pytest
 import hypothesis as hyp
 import hypothesis.strategies as hyp_st
+import numpy as np
+import pytest
 
 import gt4py.backend as gt_backend
 import gt4py.storage as gt_store
+
 from .iir_stencil_definitions import make_test_vertical_regions
 from .utils import id_version  # import fixture used by pytest
 
@@ -55,7 +56,7 @@ def test_vertical_regions_gpu(backend, id_version):
 
 
 def compile_and_run_vertical_regions(backend, id_version):
-    import gt4py.definitions as gt_defs
+    import gt4py.definitions as gt_definitions
     from gt4py import ir as gt_ir
     from gt4py.definitions import StencilID
 
@@ -63,7 +64,7 @@ def compile_and_run_vertical_regions(backend, id_version):
 
     module_name = "_test_module." + "test_vertical_regions"
     stencil_name = "test_vertical_regions_stencil"
-    options = gt_defs.BuildOptions(name=stencil_name, module=module_name, rebuild=False)
+    options = gt_definitions.BuildOptions(name=stencil_name, module=module_name, rebuild=False)
     stencil_id = StencilID("{}.{}".format(options.module, options.name), id_version)
 
     stencil_class = backend.load(stencil_id, None, options)
@@ -137,7 +138,7 @@ def test_iteration_domain_gpu(backend, id_version, origin_in, origin_out, domain
 
 
 def compile_and_run_average_stencil(backend, id_version, origin_in, origin_out, domain):
-    import gt4py.definitions as gt_defs
+    import gt4py.definitions as gt_definitions
     from gt4py import ir as gt_ir
     from gt4py.definitions import StencilID
 
@@ -177,7 +178,7 @@ def compile_and_run_average_stencil(backend, id_version, origin_in, origin_out, 
 
     module_name = "_test_module." + "test_iteration_domain"
     stencil_name = "test_iteration_domain_stencil"
-    options = gt_defs.BuildOptions(
+    options = gt_definitions.BuildOptions(
         name=stencil_name, module=module_name, rebuild=False, backend_opts={"verbose": True}
     )
     stencil_id = StencilID("{}.{}".format(options.module, options.name), id_version)

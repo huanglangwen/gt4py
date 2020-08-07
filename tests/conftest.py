@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+z`# -*- coding: utf-8 -*-
 #
 # GT4Py - GridTools4Py - GridTools for Python
 #

@@ -62,6 +62,29 @@ class TestCopy(gt_testing.StencilTestSuite):
         field_b[...] = field_a
 
 
+class TestAugAssign(gt_testing.StencilTestSuite):
+    """Increment by one stencil."""
+
+    dtypes = (np.float_,)
+    domain_range = [(1, 25), (1, 25), (1, 25)]
+    backends = CPU_BACKENDS
+    symbols = dict(
+        field_a=gt_testing.field(in_range=(-10, 10), boundary=[(0, 0), (0, 0), (0, 0)]),
+        field_b=gt_testing.field(in_range=(-10, 10), boundary=[(0, 0), (0, 0), (0, 0)]),
+    )
+
+    def definition(field_a, field_b):
+        with computation(PARALLEL), interval(...):
+            field_a += 1.0
+            field_a *= 2.0
+            field_b -= 1.0
+            field_b /= 2.0
+
+    def validation(field_a, field_b, domain=None, origin=None):
+        field_a = (field_a + 1.0) * 2.0
+        field_b = (field_b - 1.0) / 2.0
+
+
 # ---- Scale stencil ----
 class TestGlobalScale(gt_testing.StencilTestSuite):
     """Scale stencil using a global global_name.
@@ -100,7 +123,7 @@ class TestParametricScale(gt_testing.StencilTestSuite):
 
     def definition(field_a, *, scale):
         with computation(PARALLEL), interval(...):
-            field_a = scale * field_a[0, 0, 0]
+            field_a = scale * field_a
 
     def validation(field_a, *, scale, domain, origin, **kwargs):
         field_a[...] = scale * field_a
@@ -291,7 +314,7 @@ class TestHorizontalDiffusionSubroutines2(gt_testing.StencilTestSuite):
     )
 
     def definition(u, diffusion, *, weight):
-        from __externals__ import fwd_diff, BRANCH
+        from __externals__ import BRANCH, fwd_diff
 
         with computation(PARALLEL), interval(...):
             laplacian = lap_op(u=u)
@@ -352,7 +375,7 @@ class TestHorizontalDiffusionSubroutines3(gt_testing.StencilTestSuite):
         diffusion : 3D float field, output
         weight : diffusion coefficient
         """
-        from __externals__ import fwd_diff, BRANCH
+        from __externals__ import BRANCH, fwd_diff
 
         with computation(PARALLEL), interval(...):
             laplacian = lap_op(u=u)
@@ -510,3 +533,50 @@ class TestTernaryOp(gt_testing.StencilTestSuite):
     def validation(infield, outfield, *, domain, origin, **kwargs):
         outfield[...] = np.choose(infield[:, :-1, :] > 0, [-infield[:, 1:, :], infield[:, :-1, :]])
 
+
+class TestThreeWayAnd(gt_testing.StencilTestSuite):
+
+    dtypes = (np.float_,)
+    domain_range = [(1, 15), (2, 15), (1, 15)]
+    backends = CPU_BACKENDS
+    symbols = dict(
+        outfield=gt_testing.field(in_range=(-10, 10), boundary=[(0, 0), (0, 0), (0, 0)]),
+        a=gt_testing.parameter(in_range=(-100, 100)),
+        b=gt_testing.parameter(in_range=(-100, 100)),
+        c=gt_testing.parameter(in_range=(-100, 100)),
+    )
+
+    def definition(outfield, *, a, b, c):
+
+        with computation(PARALLEL), interval(...):
+            if a > 0 and b > 0 and c > 0:
+                outfield = 1
+            else:
+                outfield = 0
+
+    def validation(outfield, *, a, b, c, domain, origin, **kwargs):
+        outfield[...] = 1 if a > 0 and b > 0 and c > 0 else 0
+
+
+class TestThreeWayOr(gt_testing.StencilTestSuite):
+
+    dtypes = (np.float_,)
+    domain_range = [(1, 15), (2, 15), (1, 15)]
+    backends = CPU_BACKENDS
+    symbols = dict(
+        outfield=gt_testing.field(in_range=(-10, 10), boundary=[(0, 0), (0, 0), (0, 0)]),
+        a=gt_testing.parameter(in_range=(-100, 100)),
+        b=gt_testing.parameter(in_range=(-100, 100)),
+        c=gt_testing.parameter(in_range=(-100, 100)),
+    )
+
+    def definition(outfield, *, a, b, c):
+
+        with computation(PARALLEL), interval(...):
+            if a > 0 or b > 0 or c > 0:
+                outfield = 1
+            else:
+                outfield = 0
+
+    def validation(outfield, *, a, b, c, domain, origin, **kwargs):
+        outfield[...] = 1 if a > 0 or b > 0 or c > 0 else 0

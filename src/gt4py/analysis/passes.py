@@ -17,23 +17,22 @@
 """Definitions and utilities used by all the analysis pipeline components.
 """
 
-import functools
 import itertools
+from typing import Optional, Set, Tuple, Union
 
 from gt4py import definitions as gt_definitions
-from gt4py.definitions import Extent
 from gt4py import ir as gt_ir
 from gt4py.analysis import (
-    SymbolInfo,
+    DomainBlockInfo,
+    IJBlockInfo,
+    IntervalBlockInfo,
     IntervalInfo,
     StatementInfo,
-    IntervalBlockInfo,
-    IJBlockInfo,
-    DomainBlockInfo,
+    SymbolInfo,
     TransformData,
     TransformPass,
 )
-from gt4py.utils import UniqueIdGenerator
+from gt4py.definitions import Extent
 
 
 class IRSpecificationError(gt_definitions.GTSpecificationError):
@@ -55,11 +54,36 @@ class IntervalSpecificationError(IRSpecificationError):
             if loc is None:
                 message = "Invalid interval specification '{interval}' ".format(interval=interval)
             else:
-                message = "Invalid interval specification '{interval}' in '{scope}' (line: {line}, col: {col})".format(
-                    interval=interval, scope=loc.scope, line=loc.line, col=loc.column
-                )
+                message = "Invalid interval specification '{interval}' in '{scope}' ".format(
+                    interval=interval, scope=loc.scope
+                ) + "(line: {line}, col: {col})".format(line=loc.line, col=loc.column)
         super().__init__(message, loc=loc)
         self.interval = interval
+
+
+def _make_parallel_interval_info(parallel_interval):
+    """Create a list of IntervalInfos from a list of AxisIntervals."""
+    if parallel_interval is None:
+        return None
+    else:
+        return [
+            IntervalInfo(
+                start=(interval.start.level, interval.start.offset),
+                end=(interval.end.level, interval.end.offset),
+            )
+            for interval in parallel_interval
+        ]
+
+
+def _make_parallel_interval_from_info(parallel_interval_info):
+    """Create a list of AxisInterval from list of IntervalInfos."""
+    return [
+        gt_ir.AxisInterval(
+            start=gt_ir.AxisBound(level=interval_info.start[0], offset=interval_info.start[1]),
+            end=gt_ir.AxisBound(level=interval_info.end[0], offset=interval_info.end[1]),
+        )
+        for interval_info in parallel_interval_info
+    ]
 
 
 class InitInfoPass(TransformPass):
@@ -85,7 +109,7 @@ class InitInfoPass(TransformPass):
 
         def visit_StencilDefinition(self, node: gt_ir.StencilDefinition):
             # Add API symbols first
-            for decl in itertools.chain(node.api_fields, node.parameters):
+            for decl in itertools.chain(node.api_fields, node.parameters, node.splitters):
                 self._add_symbol(decl)
 
             # Build the information tables
@@ -287,7 +311,10 @@ class InitInfoPass(TransformPass):
 
         def visit_ComputationBlock(self, node: gt_ir.ComputationBlock):
             interval = next(iter(self.current_block_info.intervals))
-            interval_block = IntervalBlockInfo(self.data.id_generator.new, interval)
+            parallel_interval = self.current_block_info.parallel_interval
+            interval_block = IntervalBlockInfo(
+                self.data.id_generator.new, interval, parallel_interval
+            )
 
             assert node.body.stmts  # non-empty computation
             stmt_infos = [
@@ -309,7 +336,8 @@ class InitInfoPass(TransformPass):
                 if not group_outputs.isdisjoint(stmt_inputs_with_ij_offset):
                     assert interval_block.stmts
                     assert interval_block.outputs
-                    # If some output field is read with an offset it likely implies different compute extent
+                    # If some output field is read with an offset it likely implies different
+                    # compute extent
                     self.current_block_info.ij_blocks.append(
                         self._make_ij_block(interval, interval_block)
                     )
@@ -332,7 +360,11 @@ class InitInfoPass(TransformPass):
             assert node.computations  # non-empty definition
             for computation, interval in zip(node.computations, self.computation_intervals):
                 self.current_block_info = DomainBlockInfo(
-                    self.data.id_generator.new, computation.iteration_order, {interval}, []
+                    id=self.data.id_generator.new,
+                    iteration_order=computation.iteration_order,
+                    intervals={interval},
+                    parallel_interval=_make_parallel_interval_info(computation.parallel_interval),
+                    ij_blocks=[],
                 )
                 self.visit(computation)
                 self.data.blocks.append(self.current_block_info)
@@ -342,6 +374,7 @@ class InitInfoPass(TransformPass):
                 self.data.id_generator.new,
                 {interval},
                 interval_blocks=[interval_block],
+                parallel_interval=interval_block.parallel_interval,
                 inputs={**interval_block.inputs},
                 outputs=set(interval_block.outputs),
                 compute_extent=self.zero_extent,
@@ -407,28 +440,32 @@ class NormalizeBlocksPass(TransformPass):
                     for interval_block in ij_block.interval_blocks:
                         for stmt_info in interval_block.stmts:
                             interval = interval_block.interval
+                            parallel_interval = interval_block.parallel_interval
                             new_interval_block = IntervalBlockInfo(
-                                transform_data.id_generator.new,
-                                interval,
-                                [stmt_info],
-                                stmt_info.inputs,
-                                stmt_info.outputs,
+                                id=transform_data.id_generator.new,
+                                interval=interval,
+                                parallel_interval=parallel_interval,
+                                stmts=[stmt_info],
+                                inputs=stmt_info.inputs,
+                                outputs=stmt_info.outputs,
                             )
                             new_ij_block = IJBlockInfo(
-                                transform_data.id_generator.new,
-                                {interval},
-                                [new_interval_block],
-                                {**new_interval_block.inputs},
-                                set(new_interval_block.outputs),
+                                id=transform_data.id_generator.new,
+                                intervals={interval},
+                                parallel_interval=parallel_interval,
+                                interval_blocks=[new_interval_block],
+                                inputs={**new_interval_block.inputs},
+                                outputs=set(new_interval_block.outputs),
                                 compute_extent=zero_extent,
                             )
                             new_block = DomainBlockInfo(
-                                transform_data.id_generator.new,
-                                block.iteration_order,
-                                set(new_ij_block.intervals),
-                                [new_ij_block],
-                                {**new_ij_block.inputs},
-                                set(new_ij_block.outputs),
+                                id=transform_data.id_generator.new,
+                                iteration_order=block.iteration_order,
+                                intervals=set(new_ij_block.intervals),
+                                parallel_interval=parallel_interval,
+                                ij_blocks=[new_ij_block],
+                                inputs={**new_ij_block.inputs},
+                                outputs=set(new_ij_block.outputs),
                             )
                             blocks.append(new_block)
             else:
@@ -509,7 +546,9 @@ class MergeBlocksPass(TransformPass):
         iteration_order: gt_ir.IterationOrder,
     ):
         # Check that the two stages have the same compute extent
-        if not (target.compute_extent == candidate.compute_extent):
+        if not (target.compute_extent == candidate.compute_extent) or not (
+            target.parallel_interval == candidate.parallel_interval
+        ):
             return False
 
         result = True
@@ -804,6 +843,7 @@ class BuildIIRPass(TransformPass):
 
             apply_block = gt_ir.ApplyBlock(
                 interval=self._make_axis_interval(int_block.interval),
+                parallel_interval=_make_parallel_interval_from_info(int_block.parallel_interval),
                 local_symbols=local_symbols,
                 body=gt_ir.BlockStmt(stmts=stmts),
             )
@@ -877,3 +917,146 @@ class BuildIIRPass(TransformPass):
         result = gt_ir.AxisInterval(start=axis_bounds[0], end=axis_bounds[1])
 
         return result
+
+
+class DemoteLocalTemporariesToVariablesPass(TransformPass):
+    class CollectDemotableSymbols(gt_ir.IRNodeVisitor):
+        def __call__(self, node: gt_ir.StencilImplementation) -> Set[str]:
+            assert isinstance(node, gt_ir.StencilImplementation)
+            self.demotables = set(node.temporary_fields)
+            self.seen_symbols: Set[str] = set()
+            self.stage_symbols: Optional[Set[str]] = None
+            self.visit(node)
+            return self.demotables
+
+        def visit_Stage(self, node: gt_ir.Stage) -> None:
+            self.stage_symbols = set()
+
+            self.generic_visit(node)
+
+            for s in self.stage_symbols:
+                if s in self.seen_symbols:
+                    self.demotables.discard(s)
+                self.seen_symbols.add(s)
+            self.stage_symbols = None
+
+        def visit_FieldRef(self, node: gt_ir.FieldRef) -> None:
+            if any(v != 0 for v in node.offset.values()):
+                self.demotables.discard(node.name)
+            assert self.stage_symbols is not None
+            self.stage_symbols.add(node.name)
+
+    class DemoteSymbols(gt_ir.IRNodeMapper):
+        def __init__(self, demotables):
+            self.demotables = demotables
+            self.local_symbols = None
+
+        def __call__(self, node: gt_ir.StencilImplementation) -> gt_ir.StencilImplementation:
+            assert isinstance(node, gt_ir.StencilImplementation)
+            self.fields = node.fields
+            node = self.visit(node)
+            return node
+
+        def visit_FieldAccessor(
+            self, path: tuple, node_name: str, node: gt_ir.FieldAccessor
+        ) -> Tuple[bool, Optional[gt_ir.FieldAccessor]]:
+            if node.symbol in self.demotables:
+                return False, None
+            else:
+                return True, node
+
+        def visit_StencilImplementation(
+            self, path: tuple, node_name: str, node: gt_ir.StencilImplementation
+        ) -> gt_ir.StencilImplementation:
+            self.iir = node
+            res = self.generic_visit(path, node_name, node)
+            for f in self.demotables:
+                assert f in node.temporary_fields, "Tried to demote api field to variable."
+                node.fields.pop(f)
+                node.fields_extents.pop(f)
+            return res
+
+        def visit_ApplyBlock(
+            self, path: tuple, node_name: str, node: gt_ir.ApplyBlock
+        ) -> Tuple[bool, gt_ir.ApplyBlock]:
+            self.local_symbols = {}
+
+            self.generic_visit(path, node_name, node)
+
+            node.local_symbols.update(self.local_symbols)
+            self.local_symbols = None
+            return True, node
+
+        def visit_FieldRef(
+            self, path: tuple, node_name: str, node: gt_ir.FieldRef
+        ) -> Tuple[bool, Union[gt_ir.FieldRef, gt_ir.VarRef]]:
+            if node.name in self.demotables:
+                if node.name not in self.local_symbols:
+                    field_decl = self.fields[node.name]
+                    self.local_symbols[node.name] = gt_ir.VarDecl(
+                        name=node.name,
+                        data_type=field_decl.data_type,
+                        length=1,
+                        is_api=False,
+                        loc=field_decl.loc,
+                    )
+                return True, gt_ir.VarRef(name=node.name, index=0, loc=node.loc)
+
+            else:
+                return True, node
+
+    def apply(self, transform_data: TransformData) -> TransformData:
+        collect_demotable_symbols = self.CollectDemotableSymbols()
+        demotables = collect_demotable_symbols(transform_data.implementation_ir)
+
+        demote_symbols = self.DemoteSymbols(demotables)
+        transform_data.implementation_ir = demote_symbols(transform_data.implementation_ir)
+
+        return transform_data
+
+
+class CleanUpPass(TransformPass):
+    class PruneEmptyNodes(gt_ir.IRNodeMapper):
+        def __call__(self, node: gt_ir.StencilImplementation) -> None:
+            assert isinstance(node, gt_ir.StencilImplementation)
+            self.visit(node)
+
+        def visit_Stage(
+            self, path: tuple, node_name: str, node: gt_ir.Stage
+        ) -> Tuple[bool, Optional[gt_ir.Stage]]:
+            self.generic_visit(path, node_name, node)
+
+            if any(
+                isinstance(a, gt_ir.FieldAccessor) and (a.intent is gt_ir.AccessIntent.READ_WRITE)
+                for a in node.accessors
+            ):
+                return True, node
+            else:
+                return False, None
+
+        def visit_StageGroup(
+            self, path: tuple, node_name: str, node: gt_ir.StageGroup
+        ) -> Tuple[bool, Optional[gt_ir.StageGroup]]:
+            self.generic_visit(path, node_name, node)
+
+            if node.stages:
+                return True, node
+            else:
+                return False, None
+
+        def visit_MultiStage(
+            self, path: tuple, node_name: str, node: gt_ir.MultiStage
+        ) -> Tuple[bool, Optional[gt_ir.MultiStage]]:
+            self.generic_visit(path, node_name, node)
+
+            if node.groups:
+                return True, node
+            else:
+                return False, None
+
+    def apply(self, transform_data: TransformData) -> TransformData:
+
+        prune_emtpy_nodes = self.PruneEmptyNodes()
+        prune_emtpy_nodes(transform_data.implementation_ir)
+
+        return transform_data

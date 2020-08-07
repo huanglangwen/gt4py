@@ -14,18 +14,20 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-from itertools import count, product
 import sys
+from itertools import count, product
 
 import pytest
 
 import gt4py as gt
+import gt4py.definitions as gt_definitions
 from gt4py import gtscript
 from gt4py import storage as gt_storage
-import gt4py.definitions as gt_defs
 from gt4py.stencil_object import StencilObject
+
 from .input_strategies import *
 from .utils import *
+
 
 counter = count()
 RTOL = 1e-05
@@ -318,8 +320,12 @@ class StencilTestSuite(metaclass=SuiteMeta):
         - ``label``: `list` of `dtype`.
         If this value is a `list`, it will be converted to a `dict` with the default
         `None` key assigned to its value. It is meant to be populated with labels representing
-         groups of symbols that should have the same type.
-        Example:    {
+        groups of symbols that should have the same type.
+        Example:
+
+        .. code-block:: python
+
+                    {
                         'float_symbols' : (np.float32, np.float64),
                         'int_symbols' : (int, np.int_, np.int64)
                     }
@@ -339,19 +345,19 @@ class StencilTestSuite(metaclass=SuiteMeta):
 
     validation : `function`
         Stencil validation function. It should have exactly the same signature than
-        the ``definition`` function plus the extra ``_globals_``, ``_domain_``, and ``_origin_``
         arguments to access the actual values used in the current testing invocation.
-        It should always return a `list` of `numpy.ndarray`s, one per output, even if
+        the ``definition`` function plus the extra ``_globals_``, ``_domain_``, and ``_origin_``
+        It should always return a `list` of `numpy.ndarray` s, one per output, even if
         the function only defines one output value.
 
 
     Automatically generated class members are:
 
-    definition_strategies : `dict'
+    definition_strategies : `dict`
         Hypothesis strategies for the stencil parameters used at definition (externals)
         - ``constant_name``: Hypothesis strategy (`strategy`).
 
-    validation_strategies : `dict'
+    validation_strategies : `dict`
         Hypothesis strategies for the stencil parameters used at run-time (fields and parameters)
         - ``field_name``: Hypothesis strategy (`strategy`).
         - ``parameter_name``: Hypothesis strategy (`strategy`).
@@ -360,10 +366,10 @@ class StencilTestSuite(metaclass=SuiteMeta):
         Constant of dimensions (1-3). If the name of class ends in ["1D", "2D", "3D"],
         this attribute needs to match the name or an assertion error will be raised.
 
-    global_boundaries : 'dict'
+    global_boundaries : `dict`
         Expected global boundaries for the input fields.
         - ``field_name``: 'list' of ``ndim`` 'tuple`s  (``(lower_boundary, upper_boundary)``).
-            Example (3D): [(1, 3), (2, 2), (0, 0)]
+        Example (3D): `[(1, 3), (2, 2), (0, 0)]`
 
 
     """
@@ -377,7 +383,7 @@ class StencilTestSuite(metaclass=SuiteMeta):
         instance, to avoid duplication of (potentially expensive) compilations.
         """
         cls = type(self)
-        backend_slug = gt_utils.slugify(test['backend'], valid_symbols='')
+        backend_slug = gt_utils.slugify(test["backend"], valid_symbols="")
         implementation = gtscript.stencil(
             backend=test["backend"],
             definition=test["definition"],
@@ -385,7 +391,7 @@ class StencilTestSuite(metaclass=SuiteMeta):
             rebuild=True,
             externals=externals_dict,
             # debug_mode=True,
-            # _dev_opts={"cache-validation": False, "code-generation": False},
+            # _impl_opts={"cache-validation": False, "code-generation": False},
         )
 
         for k, v in externals_dict.items():
@@ -394,10 +400,17 @@ class StencilTestSuite(metaclass=SuiteMeta):
         assert isinstance(implementation, StencilObject)
         assert implementation.backend == test["backend"]
 
-        assert all(
-            field_info.boundary >= cls.global_boundaries[name]
-            for name, field_info in implementation.field_info.items()
-        )
+        # Assert strict equality for Dawn backends
+        if implementation.backend.startswith("dawn"):
+            assert all(
+                field_info.boundary == cls.global_boundaries[name]
+                for name, field_info in implementation.field_info.items()
+            )
+        else:
+            assert all(
+                field_info.boundary >= cls.global_boundaries[name]
+                for name, field_info in implementation.field_info.items()
+            )
 
         test["implementations"].append(implementation)
 
@@ -438,7 +451,7 @@ class StencilTestSuite(metaclass=SuiteMeta):
 
             max_boundary = ((0, 0), (0, 0), (0, 0))
             for name, info in implementation.field_info.items():
-                if isinstance(info, gt_defs.FieldInfo):
+                if isinstance(info, gt_definitions.FieldInfo):
                     max_boundary = tuple(
                         (max(m[0], abs(b[0])), max(m[1], b[1]))
                         for m, b in zip(max_boundary, info.boundary)

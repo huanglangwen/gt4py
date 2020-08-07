@@ -15,12 +15,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 
-import gt4py.definitions as gt_defs
 import gt4py.backend as gt_back
-
-from .iir_stencil_definitions import build_iir_stencil
+import gt4py.definitions as gt_definitions
 
 from ..utils import id_version
+from .iir_stencil_definitions import build_iir_stencil
 
 
 def generate_test_module(name, backend, *, id_version, rebuild=True):
@@ -31,7 +30,7 @@ def generate_test_module(name, backend, *, id_version, rebuild=True):
         backend_opts["debug_mode"] = False
         backend_opts["add_profile_info"] = True
         backend_opts["verbose"] = True
-    options = gt_defs.BuildOptions(
+    options = gt_definitions.BuildOptions(
         name=stencil_name, module=module_name, rebuild=rebuild, backend_opts=backend_opts
     )
     return build_iir_stencil(name, options, backend, id_version=id_version)

@@ -20,12 +20,19 @@ __copyright__ = "Copyright (c) 2014-2020 ETH Zurich"
 __license__ = "GPLv3+"
 
 
+from pkg_resources import DistributionNotFound, get_distribution
+
+
+# Disable isort to avoid circular imports
+# isort: off
 from . import config
 from . import utils
 
+#
 from . import definitions
 from . import gtscript
 
+#
 from . import ir
 from . import analysis
 from . import frontend
@@ -39,7 +46,8 @@ from .definitions import AccessKind, Boundary, DomainInfo, FieldInfo, ParameterI
 from .stencil_object import StencilObject
 from .test_builder import TestBuilder
 
-from pkg_resources import get_distribution, DistributionNotFound
+# isort: on
+
 
 try:
     __version__ = get_distribution(__name__).version

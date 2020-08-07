@@ -221,10 +221,17 @@ class SIRConverter(gt_ir.IRNodeVisitor):
         return stmt
 
     def visit_AxisBound(self, node: gt_ir.AxisBound, **kwargs):
-        assert isinstance(node.level, gt_ir.LevelMarker)
-        level = SIR.Interval.Start if node.level == gt_ir.LevelMarker.START else SIR.Interval.End
-        offset = node.offset
-        return level, offset
+        level = SIR.Interval.Start
+        if isinstance(node.level, gt_ir.LevelMarker):
+            if node.level == gt_ir.LevelMarker.END:
+                level = SIR.Interval.End
+        elif isinstance(node.level, gt_ir.VarRef):
+            # TODO: This is a hack until we determine how to handle runtime splitters...
+            if "e" in node.level.name.lower():
+                level = SIR.Interval.End
+        else:
+            raise ValueError("Unsupported axis bound level type: '%s'" % str(type(node.level)))
+        return level, node.offset
 
     def visit_AxisInterval(self, node: gt_ir.AxisInterval, **kwargs):
         lower_level, lower_offset = self.visit(node.start)
@@ -242,8 +249,15 @@ class SIRConverter(gt_ir.IRNodeVisitor):
             else SIR.VerticalRegion.Forward
         )
 
+        i_range = j_range = None
+        if node.parallel_interval is not None:
+            if len(node.parallel_interval) > 0:
+                i_range = self.visit(node.parallel_interval[0])
+            if len(node.parallel_interval) > 1:
+                j_range = self.visit(node.parallel_interval[1])
+
         vertical_region_stmt = sir_utils.make_vertical_region_decl_stmt(
-            body_ast, interval, loop_order
+            body_ast, interval, loop_order, i_range, j_range
         )
 
         return vertical_region_stmt

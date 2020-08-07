@@ -519,6 +519,13 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         body_ast = self.visit(node.body, make_block=False)
         loop_order = node.iteration_order
 
+        i_range = j_range = None
+        if node.parallel_interval is not None:
+            if len(node.parallel_interval) > 0:
+                i_range = self.visit(node.parallel_interval[0])
+            if len(node.parallel_interval) > 1:
+                j_range = self.visit(node.parallel_interval[1])
+
         vertical_region_stmt = AttrDict(
             body_ast=body_ast, interval=interval, loop_order=loop_order
         )
@@ -614,7 +621,7 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
 
 
 @gt_backend.register
-class MLIRBackend(gt_backend.BaseGTBackend):
+class MLIRBackend(gt_backend.BasePyExtBackend):
 
     MLIR_BACKEND_NS = "mlir"
     MLIR_BACKEND_NAME = "mlir"
@@ -626,7 +633,7 @@ class MLIRBackend(gt_backend.BaseGTBackend):
     }
 
     GT_BACKEND_T = "x86"
-    GENERATOR_CLASS = gt_backend.GTPyModuleGenerator
+    MODULE_GENERATOR_CLASS = gt_backend.PyExtModuleGenerator
     PYEXT_GENERATOR_CLASS = gt_backend.GTPyExtGenerator
 
     TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")

@@ -499,7 +499,16 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         return stmt
 
     def visit_AxisBound(self, node: gt_ir.AxisBound, **kwargs):
-        assert isinstance(node.level, gt_ir.LevelMarker)
+        # level = SIR.Interval.Start
+        # if isinstance(node.level, gt_ir.LevelMarker):
+        #     if node.level == gt_ir.LevelMarker.END:
+        #         level = SIR.Interval.End
+        # elif isinstance(node.level, gt_ir.VarRef):
+        #     # TODO: This is a hack until we determine how to handle runtime splitters...
+        #     if "e" in node.level.name.lower():
+        #         level = SIR.Interval.End
+        # else:
+        #     raise ValueError("Unsupported axis bound level type: '%s'" % str(type(node.level)))
         return node.level, node.offset
 
     def visit_AxisInterval(self, node: gt_ir.AxisInterval, **kwargs):
@@ -527,7 +536,11 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
                 j_range = self.visit(node.parallel_interval[1])
 
         vertical_region_stmt = AttrDict(
-            body_ast=body_ast, interval=interval, loop_order=loop_order
+            body_ast=body_ast,
+            interval=interval,
+            loop_order=loop_order,
+            i_range=i_range,
+            j_range=j_range,
         )
 
         return vertical_region_stmt
@@ -537,10 +550,10 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         functions = []
 
         self._make_global_variables(node.parameters, node.externals)
-        fields = self.fields_ #[self.visit(field) for field in node.api_fields]
+        fields = self.fields_  # [self.visit(field) for field in node.api_fields]
 
         stencil_name = node.name.split(".")[-1]
-        file_name = os.path.join(os.getcwd(), "mlir", stencil_name + ".mlir")
+        file_name = os.path.join(os.getcwd(), stencil_name + ".mlir")
         self.file_ = open(file_name, "w")
 
         if self.file_:
@@ -936,14 +949,14 @@ class MLIRBackend(gt_backend.BasePyExtBackend):
         mlir_src_file = f"{stencil_id.qualified_name.split('.')[-1]}.mlir"
 
         # Generate source
-        if options.dev_opts.get("code-generation", True):
+        if not options._impl_opts.get("disable-code-generation", False):
             gt_pyext_sources = cls.generate_extension_sources(
                 stencil_id, definition_ir, options, cls.GT_BACKEND_T
             )
         else:
             # Pass NOTHING to the builder means try to reuse the source code files
             gt_pyext_sources = {key: gt_utils.NOTHING for key in cls.TEMPLATE_FILES.keys()}
-            gt_pyext_sources[mlir_src_file] = gt_utils.NOTHING
+            gt_pyext_sources[dawn_src_file] = gt_utils.NOTHING
 
         final_ext = ".cu" if uses_cuda else ".cpp"
         keys = list(gt_pyext_sources.keys())

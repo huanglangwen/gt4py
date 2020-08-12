@@ -14,6 +14,8 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 import copy
 
@@ -23,6 +25,10 @@ from gt4py import ir as gt_ir
 from gt4py.utils import text as gt_text
 
 from .python_generator import PythonSourceGenerator
+
+
+if TYPE_CHECKING:
+    from gt4py.stencil_builder import StencilBuilder
 
 
 class NumPySourceGenerator(PythonSourceGenerator):
@@ -307,8 +313,8 @@ class NumPySourceGenerator(PythonSourceGenerator):
 
 
 class NumPyModuleGenerator(gt_backend.BaseModuleGenerator):
-    def __init__(self, backend_class):
-        super().__init__(backend_class)
+    def __init__(self, builder: "StencilBuilder"):
+        super().__init__(builder)
         self.numpy_module = self.backend_name
         self.source_generator = NumPySourceGenerator(
             indent_size=self.TEMPLATE_INDENT_SIZE,
@@ -376,6 +382,7 @@ class NumPyBackend(gt_backend.BaseBackend, gt_backend.PurePythonBackendCLIMixin)
         "is_compatible_layout": numpy_is_compatible_layout,
         "is_compatible_type": numpy_is_compatible_type,
     }
+
     languages = {"computation": "python", "bindings": []}
 
     MODULE_GENERATOR_CLASS = NumPyModuleGenerator

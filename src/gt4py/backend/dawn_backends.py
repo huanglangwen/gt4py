@@ -133,7 +133,6 @@ class SIRConverter(gt_ir.IRNodeVisitor):
         # where the :code:`python_symbol` is defined.
         return self.OP_TO_CPP.get(op, op.python_symbol)  # type: ignore
 
-<<<<<<< HEAD
     def _make_pow_expr(self, left, right):
         exponent = right.value
         if exponent == "0":
@@ -149,10 +148,7 @@ class SIRConverter(gt_ir.IRNodeVisitor):
         else:
             return sir_utils.make_fun_call_expr("gridtools::dawn::math::pow", [left, right])
 
-    def _update_field_extents(self, field_info: Dict[str, Any]):
-=======
     def _update_field_extents(self, field_info: Dict[str, Any]) -> None:
->>>>>>> dawn_update_cache
         out_fields = [
             field
             for field in field_info.values()

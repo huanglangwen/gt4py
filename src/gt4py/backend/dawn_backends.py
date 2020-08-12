@@ -220,7 +220,7 @@ class SIRConverter(gt_ir.IRNodeVisitor):
         right = self.visit(node.else_expr)
         return sir_utils.make_ternary_operator(cond, left, right)
 
-    def visit_NativeFuncCall(self, node: gt_ir.NativeFuncCall):
+    def visit_NativeFuncCall(self, node: gt_ir.NativeFuncCall, **kwargs: Any) -> SIR.FunCallExpr:
         return sir_utils.make_fun_call_expr(
             "gridtools::dawn::math::" + gt_backend.GTPyExtGenerator.NATIVE_FUNC_TO_CPP[node.func],
             [self.visit(arg) for arg in node.args],

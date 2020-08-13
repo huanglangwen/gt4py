@@ -104,3 +104,12 @@ venv.bak/
 
 # mkdocs documentation
 /site
+
+# IR files
+*.mlir
+*.sir
+*.iir
+
+# Data
+*.csv
+

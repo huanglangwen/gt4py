@@ -290,7 +290,7 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         self.field_refs_.clear()
         self.constants_.clear()
         self.stack_.clear()
-        self.max_arg_ -= 1
+        self.max_arg_ = max(0, self.max_arg_ - 1)
 
     def _make_scalar_literal(self, value, data_type: gt_ir.DataType):
         assert data_type != gt_ir.DataType.INVALID
@@ -461,18 +461,18 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
             indent = self.indent_
 
             if not out_field.is_temporary and out_field.intent != Intent.OUT:
-                if out_name in self.out_counts_:
-                    self.out_counts_[out_name] += 1
-                else:
-                    self.out_counts_[out_name] = 0
-                out_name += "_" + str(self.out_counts_[out_name])
+                out_count = self.out_counts_[out_name] + 1 if out_name in self.out_counts_ else 0
+                self.out_counts_[out_name] = out_count
+                out_name += "_" + str(out_count)
 
             line = (indent * 2) + f"%{out_name} = stencil.apply ("
             for field_name in self.field_refs_:
                 if field_name != out_name:
                     num_refs = self.field_refs_[field_name]
-                    if not out_name.startswith(field_name) and field_name in self.out_counts_:
-                        field_name += "_" + str(self.out_counts_[field_name])
+                    if out_name.startswith(field_name) and field_name in self.out_counts_:
+                        prev_count = self.out_counts_[field_name] - 1
+                        if prev_count >= 0:
+                            field_name += "_" + str(prev_count)
                     line += f"%%arg%d = %%%s : {temp_type}, " % (num_refs, field_name)
 
             line = line[0 : len(line) - 2] + f") -> {temp_type} " + "{\n"

@@ -129,6 +129,8 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         self.field_refs_ = OrderedDict()
         self.global_variables_ = OrderedDict()
         self.max_arg_ = 0
+        self.start_offset_ = 0
+        self.stop_offset_ = 0
 
         return self.visit(definition_ir)
 
@@ -149,6 +151,8 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
                 prefix = "var"
             elif type == gt_ir.TernaryOpExpr:
                 prefix = "sel"
+            elif type == gt_ir.AxisInterval:
+                prefix = "ndx"
 
             if not prefix in self.op_counts_:
                 self.op_counts_[prefix] = 0
@@ -161,6 +165,33 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         print("push('%s')" % id)
 
         return id
+
+    def _emit_interval(self, interval: AttrDict, axis: str = "K", origin: list = [0, 0, 0]):
+        """
+        %ndx0 = stencil.index 2 [0, 0, 0] : index
+        %cst0 = constant 30 : index
+        %ndx1 = cmpi "slt", %ndx0, %cst0 : index
+        """
+        if interval.lower_offset != 0: # or interval.upper_offset != 0:
+            self._add_operation(interval)
+            index_id = self.stack_.pop()
+            axis_num = ord(axis) - ord("I")
+            data_type = interval.data_type
+            code = f"%{index_id} = stencil.index {axis_num} {origin} : {data_type}"
+            self.body_.append(code)
+            print(code)
+
+            constant = AttrDict(value=interval.lower_offset, data_type=data_type, node_type=gt_ir.ScalarLiteral)
+            const_id = self._add_operation(constant)
+            self._emit_operation(const_id)
+
+            bin_op = AttrDict(lhs=index_id, rhs=const_id, op="<", data_type=data_type, node_type=gt_ir.BinOpExpr)
+            bin_op_id = self._add_operation(bin_op)
+            self._emit_operation(bin_op_id)
+
+        # TODO: Implement upper intervals...
+        if interval.upper_offset != 0:
+            pass
 
     def _emit_operation(self, id):
         operation = self.operations_[id]
@@ -237,6 +268,8 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
 
                 op_name += data_type[0]
                 if len(comp) > 0:
+                    if op_name.endswith("i"):
+                        comp = "s" + comp[1:]
                     op_name += ' "%s",' % comp
                 code = f"%{id} = {op_name} %{operation.lhs}, %{operation.rhs} : {data_type}"
 
@@ -251,6 +284,35 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
             print(code)
 
         return operation
+
+    def _emit_stencil_apply(self, out_name: str):
+        # %lap = stencil.apply %arg1 = %input : !stencil.temp<ijk,f64> {
+        out_field = self.fields_[out_name]
+        out_field.data_type = "f64"  # AUTO data type comes from temporaries...
+        temp_type = f"!stencil.temp<{out_field.dimensions}{out_field.data_type}>"
+        indent = self.indent_
+
+        if not out_field.is_temporary and out_field.intent != Intent.OUT:
+            out_count = self.out_counts_[out_name] + 1 if out_name in self.out_counts_ else 0
+            self.out_counts_[out_name] = out_count
+            out_name += "_" + str(out_count)
+
+        line = (indent * 2) + f"%{out_name} = stencil.apply ("
+        for field_name in self.field_refs_:
+            if field_name != out_name:
+                num_refs = self.field_refs_[field_name]
+                if out_name.startswith(field_name) and field_name in self.out_counts_:
+                    prev_count = self.out_counts_[field_name] - 1
+                    if prev_count >= 0:
+                        field_name += "_" + str(prev_count)
+                line += f"%%arg%d = %%%s : {temp_type}, " % (num_refs, field_name)
+
+        line = line[0: len(line) - 2] + f") -> {temp_type} " + "{\n"
+        self.file_.write(line)
+
+        for line in self.body_:
+            self.file_.write((indent * 3) + line + "\n")
+        self.file_.write((indent * 2) + "}\n")
 
     def _is_relational(self, op: gt_ir.BinaryOperator):
         return "<" in op.python_symbol or ">" in op.python_symbol or "=" in op.python_symbol
@@ -291,6 +353,7 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         self.constants_.clear()
         self.stack_.clear()
         self.max_arg_ = max(0, self.max_arg_ - 1)
+        # self.start_offset_ = self.stop_offset_ = 0
 
     def _make_scalar_literal(self, value, data_type: gt_ir.DataType):
         assert data_type != gt_ir.DataType.INVALID
@@ -452,39 +515,9 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
 
         # Emit apply code...
         if self.file_:
-            # %lap = stencil.apply %arg1 = %input : !stencil.temp<ijk,f64> {
-            out_name = lhs_op.name
-            out_field = self.fields_[out_name]
+            self._emit_stencil_apply(lhs_op.name)
 
-            out_field.data_type = "f64"  # AUTO data type comes from temporaries...
-            temp_type = f"!stencil.temp<{out_field.dimensions}{out_field.data_type}>"
-            indent = self.indent_
-
-            if not out_field.is_temporary and out_field.intent != Intent.OUT:
-                out_count = self.out_counts_[out_name] + 1 if out_name in self.out_counts_ else 0
-                self.out_counts_[out_name] = out_count
-                out_name += "_" + str(out_count)
-
-            line = (indent * 2) + f"%{out_name} = stencil.apply ("
-            for field_name in self.field_refs_:
-                if field_name != out_name:
-                    num_refs = self.field_refs_[field_name]
-                    if out_name.startswith(field_name) and field_name in self.out_counts_:
-                        prev_count = self.out_counts_[field_name] - 1
-                        if prev_count >= 0:
-                            field_name += "_" + str(prev_count)
-                    line += f"%%arg%d = %%%s : {temp_type}, " % (num_refs, field_name)
-
-            line = line[0 : len(line) - 2] + f") -> {temp_type} " + "{\n"
-            self.file_.write(line)
-
-            for line in self.body_:
-                self.file_.write((indent * 3) + line + "\n")
-            self.file_.write((indent * 2) + "}\n")
-
-        assign_expr = AttrDict(lhs=lhs, rhs=rhs, op="=", node_type=gt_ir.Assign)
-
-        return assign_expr
+        return AttrDict(lhs=lhs, rhs=rhs, op="=", node_type=gt_ir.Assign)
 
     def visit_AugAssign(self, node: gt_ir.AugAssign):
         bin_op = gt_ir.BinOpExpr(lhs=node.target, op=node.op, rhs=node.value)
@@ -499,17 +532,13 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
         return stmt
 
     def visit_AxisBound(self, node: gt_ir.AxisBound, **kwargs):
-        # level = SIR.Interval.Start
-        # if isinstance(node.level, gt_ir.LevelMarker):
-        #     if node.level == gt_ir.LevelMarker.END:
-        #         level = SIR.Interval.End
-        # elif isinstance(node.level, gt_ir.VarRef):
-        #     # TODO: This is a hack until we determine how to handle runtime splitters...
-        #     if "e" in node.level.name.lower():
-        #         level = SIR.Interval.End
-        # else:
-        #     raise ValueError("Unsupported axis bound level type: '%s'" % str(type(node.level)))
-        return node.level, node.offset
+        level = node.level
+        offset = node.offset
+        if level == gt_ir.LevelMarker.START:
+            self.start_offset_ = offset
+        else:
+            self.stop_offset_ = offset
+        return level, offset
 
     def visit_AxisInterval(self, node: gt_ir.AxisInterval, **kwargs):
         lower_level, lower_offset = self.visit(node.start)
@@ -520,7 +549,12 @@ class MLIRConverter(gt_ir.IRNodeVisitor):
             lower_offset=lower_offset,
             upper_offset=upper_offset,
             node_type=gt_ir.AxisInterval,
+            data_type="index"
         )
+
+        # Generate indices for non-zero offsets...
+        self._emit_interval(interval)
+
         return interval
 
     def visit_ComputationBlock(self, node: gt_ir.ComputationBlock, **kwargs):

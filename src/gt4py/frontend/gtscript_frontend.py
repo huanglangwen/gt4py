@@ -196,11 +196,7 @@ class CallInliner(ast.NodeTransformer):
     def __init__(self, context: dict):
         self.context = context
         self.current_block = None
-        self.all_skip_names = set(
-            gtscript.builtins
-            | {"gt4py", "gtscript"}
-            | set(gt_ir.NativeFunction.IR_OP_TO_PYTHON_SYMBOL.values())
-        )
+        self.all_skip_names = set(gtscript.builtins | {"gt4py", "gtscript"})
 
     def __call__(self, func_node: ast.FunctionDef):
         self.visit(func_node)
@@ -249,6 +245,7 @@ class CallInliner(ast.NodeTransformer):
 
     def visit_Call(self, node: ast.Call, *, target_node=None):
         call_name = node.func.id
+
         if call_name in gtscript.MATH_BUILTINS:
             node.args = [self.visit(arg) for arg in node.args]
             return node
@@ -1172,11 +1169,9 @@ class GTScriptParser(ast.NodeVisitor):
 
         nonlocal_symbols = {}
 
-        builtins = gtscript.builtins | set(gt_ir.NativeFunction.IR_OP_TO_PYTHON_SYMBOL.values())
-
         name_nodes = gt_meta.collect_names(definition)
         for collected_name in name_nodes.keys():
-            if collected_name not in builtins:
+            if collected_name not in gtscript.builtins:
                 root_name = collected_name.split(".")[0]
                 if root_name in imported_symbols:
                     imported_symbols[root_name].setdefault(

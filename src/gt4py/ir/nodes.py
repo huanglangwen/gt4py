@@ -92,7 +92,7 @@ storing a reference to the piece of source code which originated the node.
     Ref         = VarRef(name: str, [index: int])
                 | FieldRef(name: str, offset: Dict[str, int])
 
-    NativeFuncCall(func: NativeFunction, args: List[Expr])
+    NativeFuncCall(func: NativeFunction, args: List[Expr], data_type: DataType)
 
     Expr        = Literal | Ref | NativeFuncCall | CompositeExpr | InvalidBranch
 
@@ -402,32 +402,27 @@ class NativeFunction(enum.Enum):
     MIN = 2
     MAX = 3
     MOD = 4
+    SIN = 5
+    COS = 6
+    TAN = 7
+    ARCSIN = 8
+    ARCCOS = 9
+    ARCTAN = 10
 
-    SIN = 11
-    COS = 12
-    TAN = 13
-    ARCSIN = 14
-    ARCCOS = 15
-    ARCTAN = 16
+    SQRT = 11
+    EXP = 12
+    LOG = 13
 
-    SQRT = 21
-    EXP = 22
-    LOG = 23
-
-    ISFINITE = 101
-    ISINF = 102
-    ISNAN = 103
-    FLOOR = 111
-    CEIL = 112
-    TRUNC = 113
+    ISFINITE = 14
+    ISINF = 15
+    ISNAN = 16
+    FLOOR = 17
+    CEIL = 18
+    TRUNC = 19
 
     @property
-    def numargs(self):
+    def arity(self):
         return type(self).IR_OP_TO_NUM_ARGS[self]
-
-    @property
-    def python_symbol(self):
-        return type(self).IR_OP_TO_PYTHON_SYMBOL[self]
 
 
 NativeFunction.IR_OP_TO_NUM_ARGS = {
@@ -450,28 +445,6 @@ NativeFunction.IR_OP_TO_NUM_ARGS = {
     NativeFunction.FLOOR: 1,
     NativeFunction.CEIL: 1,
     NativeFunction.TRUNC: 1,
-}
-
-NativeFunction.IR_OP_TO_PYTHON_SYMBOL = {
-    NativeFunction.ABS: "abs",
-    NativeFunction.MIN: "min",
-    NativeFunction.MAX: "max",
-    NativeFunction.MOD: "mod",
-    NativeFunction.SIN: "sin",
-    NativeFunction.COS: "cos",
-    NativeFunction.TAN: "tan",
-    NativeFunction.ARCSIN: "arcsin",
-    NativeFunction.ARCCOS: "arccos",
-    NativeFunction.ARCTAN: "arctan",
-    NativeFunction.SQRT: "sqrt",
-    NativeFunction.EXP: "exp",
-    NativeFunction.LOG: "log",
-    NativeFunction.ISFINITE: "isfinite",
-    NativeFunction.ISINF: "isinf",
-    NativeFunction.ISNAN: "isnan",
-    NativeFunction.FLOOR: "floor",
-    NativeFunction.CEIL: "ceil",
-    NativeFunction.TRUNC: "trunc",
 }
 
 

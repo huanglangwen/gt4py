@@ -117,13 +117,40 @@ class StencilObject(abc.ABC):
     def __call__(self, *args, **kwargs):
         pass
 
-    def _validate_args(self, used_field_args, used_param_args, domain, origin, exec_info=None):
-        for name, field_info in self.field_info.items():
-            if field_info is not None and used_field_args[name] is None:
-                raise ValueError(f"Field '{name}' is None.")
-        for name, parameter_info in self.parameter_info.items():
-            if parameter_info is not None and used_param_args[name] is None:
-                raise ValueError(f"Parameter '{name}' is None.")
+    def _get_max_domain(self, field_args, origin):
+        """Return the maximum domain size possible
+
+        Parameters
+        ----------
+            field_args: `dict`
+                Mapping from field names to actually passed data arrays.
+
+            origin: `{'field_name': [int * ndims]}`
+                The origin for each field.
+
+
+        Returns
+        -------
+            `Shape`: the maximum domain size.
+        """
+        max_domain = Shape([sys.maxsize] * self.domain_info.ndims)
+        shapes = {name: Shape(field.shape) for name, field in field_args.items()}
+        for name, shape in shapes.items():
+            upper_boundary = Index(self.field_info[name].boundary.upper_indices)
+            max_domain &= shape - (Index(origin[name]) + upper_boundary)
+        return max_domain
+
+    def _validate_args(self, used_field_args, used_param_args, domain, origin):
+        """Validate input arguments to _call_run.
+
+        Raises
+        -------
+            ValueError
+                If invalid data or inconsistent options are specified.
+
+            TypeError
+                If an incorrect field or parameter data type is passed.
+        """
 
         # assert compatibility of fields with stencil
         for name, field in used_field_args.items():
@@ -176,11 +203,7 @@ class StencilObject(abc.ABC):
             raise ValueError(f"Compute domain contains zero sizes '{domain}')")
 
         # determine maximum domain
-        max_domain = Shape([sys.maxsize] * self.domain_info.ndims)
-        shapes = {name: Shape(field.shape) for name, field in used_field_args.items()}
-        for name, shape in shapes.items():
-            upper_boundary = Index(self.field_info[name].boundary.upper_indices)
-            max_domain &= shape - (Index(origin[name]) + upper_boundary)
+        max_domain = self._get_max_domain(used_field_args, origin)
 
         if not domain <= max_domain:
             raise ValueError(
@@ -228,10 +251,10 @@ class StencilObject(abc.ABC):
                 largest feasible domain according to the provided input fields
                 and origin values (`None` by default).
 
-            origin :  `[int * ndims]` or `{'field_name': [int * ndims]}`, optional
+            origin :  `[int * ndims]` or {'field_name': [int * ndims]} , optional
                 If a single offset is passed, it will be used for all fields.
                 If a `dict` is passed, there could be an entry for each field.
-                A special key *'_all_'* will represent the value to be used for all
+                A special key '_all_' will represent the value to be used for all
                 the fields not explicitly defined. If `None` is passed or it is
                 not possible to assign a value to some field according to the
                 previous rule, the value will be inferred from the global boundaries

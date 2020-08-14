@@ -14,11 +14,4 @@ def laplace_index(in_f: sd, out_f: sd):
         )
 
     with computation(PARALLEL), interval(30, None):
-        # n0 = stencil.index 2 [0, 0, 0] : index
-        # c1 = constant 30 : index
-        # b0 = cmpi "sge", n0, c1 : index
-        # i0 = scf.if b0 -> (f64) {
-        #     e5 = negf exp : f64
-        #     scf.yield e5 : f64
-        # }
         out_f = -out_f

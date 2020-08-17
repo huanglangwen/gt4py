@@ -22,6 +22,7 @@ import itertools
 import numbers
 import types
 
+import networkx as nx
 import numpy as np
 
 from gt4py import definitions as gt_definitions
@@ -409,6 +410,43 @@ class CompiledIfInliner(ast.NodeTransformer):
                 )
 
         return node if node else None
+
+
+class ParallelRaceConditionChecker(gt_ir.IRNodeVisitor):
+    @classmethod
+    def apply(cls, root_node):
+        return cls()(root_node)
+
+    def __init__(self):
+        self.iteration_order = None
+
+    def __call__(self, node):
+        assert isinstance(node, gt_ir.StencilDefinition)
+        self.stencil_name = node.name
+        self.visit(node)
+
+    def _check(self, graph: nx.DiGraph):
+        error_message = f"race condition detected in stencil: {self.stencil_name}"
+        for cycle in nx.simple_cycles(graph):
+            full_cycle = cycle + [cycle[0]]
+            for source, target in zip(full_cycle[:-1], full_cycle[1:]):
+                offsets = graph.get_edge_data(source, target).get("offsets", [])
+                if any([offset["I"] != 0 or offset["J"] != 0 for offset in offsets]):
+                    raise GTScriptSyntaxError(
+                        f"Horizontal {error_message}.\n\tCycle: {', '.join(full_cycle)}"
+                    )
+                elif any([offset["K"] != 0 for offset in offsets]):
+                    raise GTScriptSyntaxError(
+                        f"Vertical {error_message}.\n\tCycle: {', '.join(full_cycle)}"
+                    )
+
+    def visit_ComputationBlock(self, node: gt_ir.ComputationBlock):
+        # Look for vertical race conditions
+        self.iteration_order = node.iteration_order
+        if self.iteration_order != gt_ir.IterationOrder.PARALLEL:
+            return
+        else:
+            self._check(gt_ir.utils.create_field_dependency_graph(node.body))
 
 
 #
@@ -1405,6 +1443,9 @@ class GTScriptParser(ast.NodeVisitor):
             externals=self.resolved_externals,
             docstring=inspect.getdoc(self.definition) or "",
         )
+
+        # Run verifications on the definition IR
+        ParallelRaceConditionChecker.apply(self.definition_ir)
 
         return self.definition_ir
 

@@ -802,63 +802,83 @@ create_field_dependency_graph = FieldDependencyGraphCreator.apply
 
 class DataFlowGraphCreator(IRNodeVisitor):
     @classmethod
-    def apply(cls, root_node):
+    def apply(cls, root_node: StencilImplementation) -> None:
         return cls()(root_node)
 
-    def __call__(self):
+    def __call__(self) -> None:
         self.graph = nx.DiGraph()
         self.fields = dict()
         self.total_size = 0
-        self.field_refs = {}
-        self.var_refs = []
+        self.field_refs = list()
+        self.var_refs = list()
         self.create_logger()
 
-    def create_logger(self):
+    def create_logger(self, file_name: str = "") -> None:
         formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-        handler = logging.FileHandler("/tmp/fv3ser.log", "a")
-        handler.setFormatter(formatter)
-        logger = logging.getLogger("fv3ser")
-        logger.addHandler(handler)
+        logger = logging.getLogger("gt4py")
+        if file_name != "":
+            handler = logging.FileHandler(file_name, "a")
+            handler.setFormatter(formatter)
+            logger.addHandler(handler)
         self.logger = logger
 
-    # : gt.storage.Storage
     def add_node(self, name: str, storage=None) -> None:
         if len(name) < 1:
             name = "storage%d" % len(self.fields)
         self.graph.add_node(name)
-        self.fields[name] = storage
+        self.fields[name].storage = storage
         self.total_size += storage.size
         shape = str(storage.shape)
         strides = str(storage.strides)
         dtype = str(storage.dtype)
-        self.logger.debug(f"Create storage node '{name}', of shape {shape}, size {storage.size}, type {dtype}, and strides {strides}")
+        self.logger.debug(
+            f"Create storage node '{name}', of shape {shape}, size {storage.size}, type {dtype}, and strides {strides}"
+        )
 
     def visit_FieldDecl(self, node: FieldDecl, **kwargs: Any) -> None:
-        # NOTE Add unstructured support here
-        field_dimensions = sir_utils.make_field_dimensions_cartesian(
-            [1 if ax in node.axes else 0 for ax in DOMAIN_AXES]
-        )
-        self.field_info[node.name] = dict(
-            field_decl=sir_utils.make_field(
-                name=node.name, dimensions=field_dimensions, is_temporary=not node.is_api
-            ),
+        dimensions = [1 if ax in node.axes else 0 for ax in DOMAIN_AXES]
+        self.fields[node.name] = gtscript.AttrDict(
+            name=node.name,
+            dimensions=dimensions,
+            is_temporary=not node.is_api,
             access=None,
-            extent=gt_definitions.Extent.zeros(),
+            extent=Extent.zeros(),
             inputs=set(),
+            storage=None,
         )
 
     def visit_FieldRef(self, node: FieldRef, **kwargs: Any) -> None:
-        if node.name not in self.fields:
-            self.add_node(node.name)
-        if node.name in self.field_refs:
-            self.field_refs[node.name].append(node.offset)
-        else:
-            self.field_refs[node.name] = [node.offset]
+        field_name = node.name
+        if kwargs["write_field"] == "":
+            self.fields[field_name].access = AccessKind.READ_WRITE
+        elif self.fields[field_name].access is None:
+            self.fields[field_name].access = AccessKind.READ_ONLY
+            if kwargs["write_field"] in self.fields:
+                self.fields[field_name].inputs.add(field_name)
+
+        offset = tuple(node.offset.values())
+        self.field_info[field_name].extent |= Extent(
+            [(offset[0], offset[0]), (offset[1], offset[1]), (0, 0)]
+        )  # exclude sequential axis
+
+        self.field_refs.append(field_name)
 
     def visit_VarRef(self, node: VarRef, **kwargs: Any) -> None:
         if node.name not in self.graph.nodes:
             self.graph.add_node(node.name)
         self.var_refs.append(node.name)
+
+    def visit_Assign(self, node: Assign, **kwargs: Any) -> None:
+        kwargs["write_field"] = ""
+        self.visit(node.target, **kwargs)
+        kwargs["write_field"] = node.target.name
+        self.visit(node.value, **kwargs)
+
+        target_name = node.target.name
+        for field_name in self.field_refs:
+            self.graph.add_edge(target_name, field_name)
+        for var_name in self.var_refs:
+            self.graph.add_edge(target_name, var_name)
 
 
 create_dataflow_graph = DataFlowGraphCreator.apply

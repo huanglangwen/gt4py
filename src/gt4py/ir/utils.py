@@ -16,6 +16,7 @@
 
 import ast
 import inspect
+import logging
 import numbers
 import textwrap
 import types
@@ -797,3 +798,67 @@ class FieldDependencyGraphCreator(IRNodeVisitor):
 
 
 create_field_dependency_graph = FieldDependencyGraphCreator.apply
+
+
+class DataFlowGraphCreator(IRNodeVisitor):
+    @classmethod
+    def apply(cls, root_node):
+        return cls()(root_node)
+
+    def __call__(self):
+        self.graph = nx.DiGraph()
+        self.fields = dict()
+        self.total_size = 0
+        self.field_refs = {}
+        self.var_refs = []
+        self.create_logger()
+
+    def create_logger(self):
+        formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+        handler = logging.FileHandler("/tmp/fv3ser.log", "a")
+        handler.setFormatter(formatter)
+        logger = logging.getLogger("fv3ser")
+        logger.addHandler(handler)
+        self.logger = logger
+
+    # : gt.storage.Storage
+    def add_node(self, name: str, storage=None) -> None:
+        if len(name) < 1:
+            name = "storage%d" % len(self.fields)
+        self.graph.add_node(name)
+        self.fields[name] = storage
+        self.total_size += storage.size
+        shape = str(storage.shape)
+        strides = str(storage.strides)
+        dtype = str(storage.dtype)
+        self.logger.debug(f"Create storage node '{name}', of shape {shape}, size {storage.size}, type {dtype}, and strides {strides}")
+
+    def visit_FieldDecl(self, node: FieldDecl, **kwargs: Any) -> None:
+        # NOTE Add unstructured support here
+        field_dimensions = sir_utils.make_field_dimensions_cartesian(
+            [1 if ax in node.axes else 0 for ax in DOMAIN_AXES]
+        )
+        self.field_info[node.name] = dict(
+            field_decl=sir_utils.make_field(
+                name=node.name, dimensions=field_dimensions, is_temporary=not node.is_api
+            ),
+            access=None,
+            extent=gt_definitions.Extent.zeros(),
+            inputs=set(),
+        )
+
+    def visit_FieldRef(self, node: FieldRef, **kwargs: Any) -> None:
+        if node.name not in self.fields:
+            self.add_node(node.name)
+        if node.name in self.field_refs:
+            self.field_refs[node.name].append(node.offset)
+        else:
+            self.field_refs[node.name] = [node.offset]
+
+    def visit_VarRef(self, node: VarRef, **kwargs: Any) -> None:
+        if node.name not in self.graph.nodes:
+            self.graph.add_node(node.name)
+        self.var_refs.append(node.name)
+
+
+create_dataflow_graph = DataFlowGraphCreator.apply

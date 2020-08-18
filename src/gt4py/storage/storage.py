@@ -70,10 +70,8 @@ def zeros(backend, default_origin, shape, dtype, mask=None, *, managed_memory=Fa
 def from_array(
     data, backend, default_origin, shape=None, dtype=None, mask=None, *, managed_memory=False
 ):
-    if cp is not None and isinstance(data, cp.ndarray):
-        xp = cp
-    else:
-        xp = np
+    is_cupy_array = cp is not None and isinstance(data, cp.ndarray)
+    xp = cp if is_cupy_array else np
     if shape is None:
         shape = xp.asarray(data).shape
     if dtype is None:
@@ -86,7 +84,7 @@ def from_array(
         mask=mask,
         managed_memory=managed_memory,
     )
-    if cp is not None and isinstance(data, cp.ndarray):
+    if is_cupy_array:
         if isinstance(storage, GPUStorage) or isinstance(storage, ExplicitlySyncedGPUStorage):
             tmp = storage_utils.gpu_view(storage)
             tmp[...] = data

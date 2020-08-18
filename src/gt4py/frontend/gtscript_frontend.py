@@ -1445,7 +1445,7 @@ class GTScriptParser(ast.NodeVisitor):
         )
 
         # Run verifications on the definition IR
-        ParallelRaceConditionChecker.apply(self.definition_ir)
+        # ParallelRaceConditionChecker.apply(self.definition_ir)
 
         return self.definition_ir
 

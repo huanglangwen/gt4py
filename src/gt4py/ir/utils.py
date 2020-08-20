@@ -810,8 +810,7 @@ class DataFlowGraphCreator(IRNodeVisitor):
         self.graph = nx.DiGraph()
         self.fields = dict()
         self.total_size = 0
-        self.field_refs = list()
-        self.var_refs = list()
+        self.stage_names = []
         self.create_logger()
         self.visit(node)
         return self
@@ -826,11 +825,6 @@ class DataFlowGraphCreator(IRNodeVisitor):
         self.logger = logger
 
     def add_node(self, field: AttrDict) -> None:
-        name = field.name
-        if len(name) < 1:
-            name = "field_%d" % len(self.fields)
-        self.graph.add_node(name)
-
         storage = field.storage
         if storage is None:
             dtype = str(field.dtype)
@@ -843,11 +837,65 @@ class DataFlowGraphCreator(IRNodeVisitor):
             strides = str(storage.strides)
             size = storage.size
 
+        self.fields[field.name] = field
         self.total_size += size
         self.logger.debug(
-            f"Create storage node '{name}', of shape {shape}, size {size}, type {dtype}, and strides {strides}"
+            f"Create storage node '{field.name}', of shape {shape}, size {size}, type {dtype}, and strides {strides}"
         )
-        self.fields[name] = field
+
+    def save(self, filename: str):
+        g = self.graph
+        layout = nx.planar_layout(g)
+
+        perm_nodes = []
+        temp_nodes = []
+        node_labels = {}
+
+        for field in self.fields.values():
+            field_name = field.name
+            node_labels[field_name] = field_name
+            if field.is_temp:
+                temp_nodes.append(field_name)
+            else:
+                perm_nodes.append(field_name)
+
+        nx.draw_networkx_nodes(g, layout,
+                               nodelist=temp_nodes,
+                               node_color='w',
+                               node_shape='s',
+                               node_size=500,
+                               alpha=0.8,
+        )
+
+        nx.draw_networkx_nodes(g, layout,
+                               nodelist=perm_nodes,
+                               node_color='gray',
+                               node_shape='s',
+                               node_size = 500,
+                               alpha=0.8,
+        )
+
+        for stage_name in self.stage_names:
+            node_labels[stage_name] = stage_name
+
+        nx.draw_networkx_nodes(g, layout,
+                               nodelist=self.stage_names,
+                               node_color='gray',
+                               node_shape='v',
+                               node_size=500,
+                               alpha=0.8,
+        )
+
+        nx.draw_networkx_edges(g, layout, width=1.0)
+        nx.draw_networkx_labels(g, layout, node_labels, font_size=16)
+
+        import matplotlib.pyplot as plt
+        plt.axis("off")
+        plt.savefig(filename, with_labels=True)
+
+    def visit_Stage(self, node: Stage) -> None:
+        self.stage_names.append(node.name)
+        self.generic_visit(node)
 
     def visit_FieldDecl(self, node: FieldDecl, **kwargs: Any) -> None:
         mask = tuple([1 if ax in node.axes else 0 for ax in ("I", "J", "K")])
@@ -856,7 +904,7 @@ class DataFlowGraphCreator(IRNodeVisitor):
             dtype=str(node.data_type).lower(),
             mask=mask,
             is_temp=not node.is_api,
-            access=None,
+            intent=None,
             extent=Extent.zeros(),
             inputs=set(),
             storage=None,
@@ -865,10 +913,12 @@ class DataFlowGraphCreator(IRNodeVisitor):
 
     def visit_FieldRef(self, node: FieldRef, **kwargs: Any) -> None:
         field_name = node.name
-        if kwargs["write_field"] == "":
-            self.fields[field_name].access = 1  # AccessKind.READ_WRITE
-        elif self.fields[field_name].access is None:
-            self.fields[field_name].access = 0  # AccessKind.READ_ONLY
+        kwargs["field_refs"].append(field_name)
+
+        if "write_field" not in kwargs or kwargs["write_field"] == "":
+            self.fields[field_name].intent = 1  # AccessKind.READ_WRITE
+        elif self.fields[field_name].intent is None:
+            self.fields[field_name].intent = 0  # AccessKind.READ_ONLY
             if kwargs["write_field"] in self.fields:
                 self.fields[field_name].inputs.add(field_name)
 
@@ -877,24 +927,28 @@ class DataFlowGraphCreator(IRNodeVisitor):
             [(offset[0], offset[0]), (offset[1], offset[1]), (0, 0)]
         )  # exclude sequential axis
 
-        self.field_refs.append(field_name)
-
-    def visit_VarRef(self, node: VarRef, **kwargs: Any) -> None:
-        if node.name not in self.graph.nodes:
-            self.graph.add_node(node.name)
-        self.var_refs.append(node.name)
+    # def visit_VarRef(self, node: VarRef, **kwargs: Any) -> None:
+    #     kwargs["var_refs"].append(node.name)
 
     def visit_Assign(self, node: Assign, **kwargs: Any) -> None:
+        kwargs["field_refs"] = []
+        kwargs["var_refs"] = []
         kwargs["write_field"] = ""
         self.visit(node.target, **kwargs)
         kwargs["write_field"] = node.target.name
         self.visit(node.value, **kwargs)
 
+        stage_name = self.stage_names[-1]
         target_name = node.target.name
-        for field_name in self.field_refs:
-            self.graph.add_edge(target_name, field_name)
-        for var_name in self.var_refs:
-            self.graph.add_edge(target_name, var_name)
+        print(f"{stage_name} => {target_name}")
+        self.graph.add_edge(stage_name, target_name)
+
+        for field_name in kwargs["field_refs"]:
+            if target_name != field_name:
+                print(f"{field_name} => {target_name}")
+                self.graph.add_edge(field_name, target_name)
+        # for var_name in self.var_refs:
+        #     self.graph.add_edge(target_name, var_name)
 
 
 create_dataflow_graph = DataFlowGraphCreator.apply

@@ -128,6 +128,8 @@ class IRTransformer:
             options.build_info["iir"] = self.transform_data.implementation_ir
             options.build_info["symbol_info"] = self.transform_data.symbols
 
+        dataflow_graph = gt_ir.utils.create_dataflow_graph(self.transform_data.implementation_ir)
+
         return self.transform_data.implementation_ir
 
 

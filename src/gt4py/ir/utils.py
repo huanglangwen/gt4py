@@ -25,6 +25,7 @@ import networkx as nx
 
 import gt4py.gtscript as gtscript
 from gt4py.utils import NOTHING
+from gt4py.utils.attrib import AttrDict
 
 from .nodes import *
 
@@ -805,13 +806,15 @@ class DataFlowGraphCreator(IRNodeVisitor):
     def apply(cls, root_node: StencilImplementation) -> None:
         return cls()(root_node)
 
-    def __call__(self) -> None:
+    def __call__(self, node) -> None:
         self.graph = nx.DiGraph()
         self.fields = dict()
         self.total_size = 0
         self.field_refs = list()
         self.var_refs = list()
         self.create_logger()
+        self.visit(node)
+        return self
 
     def create_logger(self, file_name: str = "") -> None:
         formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -822,42 +825,55 @@ class DataFlowGraphCreator(IRNodeVisitor):
             logger.addHandler(handler)
         self.logger = logger
 
-    def add_node(self, name: str, storage=None) -> None:
+    def add_node(self, field: AttrDict) -> None:
+        name = field.name
         if len(name) < 1:
-            name = "storage%d" % len(self.fields)
+            name = "field_%d" % len(self.fields)
         self.graph.add_node(name)
-        self.fields[name].storage = storage
-        self.total_size += storage.size
-        shape = str(storage.shape)
-        strides = str(storage.strides)
-        dtype = str(storage.dtype)
+
+        storage = field.storage
+        if storage is None:
+            dtype = str(field.dtype)
+            shape = str(field.mask)
+            strides = shape
+            size = 1
+        else:
+            dtype = str(storage.dtype)
+            shape = str(storage.shape)
+            strides = str(storage.strides)
+            size = storage.size
+
+        self.total_size += size
         self.logger.debug(
-            f"Create storage node '{name}', of shape {shape}, size {storage.size}, type {dtype}, and strides {strides}"
+            f"Create storage node '{name}', of shape {shape}, size {size}, type {dtype}, and strides {strides}"
         )
+        self.fields[name] = field
 
     def visit_FieldDecl(self, node: FieldDecl, **kwargs: Any) -> None:
-        dimensions = [1 if ax in node.axes else 0 for ax in DOMAIN_AXES]
-        self.fields[node.name] = gtscript.AttrDict(
+        mask = tuple([1 if ax in node.axes else 0 for ax in ("I", "J", "K")])
+        field = AttrDict(
             name=node.name,
-            dimensions=dimensions,
-            is_temporary=not node.is_api,
+            dtype=str(node.data_type).lower(),
+            mask=mask,
+            is_temp=not node.is_api,
             access=None,
             extent=Extent.zeros(),
             inputs=set(),
             storage=None,
         )
+        self.add_node(field)
 
     def visit_FieldRef(self, node: FieldRef, **kwargs: Any) -> None:
         field_name = node.name
         if kwargs["write_field"] == "":
-            self.fields[field_name].access = AccessKind.READ_WRITE
+            self.fields[field_name].access = 1  # AccessKind.READ_WRITE
         elif self.fields[field_name].access is None:
-            self.fields[field_name].access = AccessKind.READ_ONLY
+            self.fields[field_name].access = 0  # AccessKind.READ_ONLY
             if kwargs["write_field"] in self.fields:
                 self.fields[field_name].inputs.add(field_name)
 
         offset = tuple(node.offset.values())
-        self.field_info[field_name].extent |= Extent(
+        self.fields[field_name].extent |= Extent(
             [(offset[0], offset[0]), (offset[1], offset[1]), (0, 0)]
         )  # exclude sequential axis
 

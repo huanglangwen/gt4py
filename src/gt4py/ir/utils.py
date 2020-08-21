@@ -943,8 +943,9 @@ class DataFlowGraphCreator(IRNodeVisitor):
 
         stage_name = self.stage_names[-1]
         target_name = node.target.name
-        print(f"{stage_name} => {target_name}")
-        self.graph.add_edge(stage_name, target_name)
+        if target_name in self.fields:
+            print(f"{stage_name} => {target_name}")
+            self.graph.add_edge(stage_name, target_name)
 
         for field_name in self.field_refs:
             if target_name != field_name:

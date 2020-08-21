@@ -810,6 +810,8 @@ class DataFlowGraphCreator(IRNodeVisitor):
         self.graph = nx.DiGraph()
         self.fields = dict()
         self.total_size = 0
+        self.field_refs = []
+        self.var_refs = []
         self.stage_names = []
         self.create_logger()
         self.visit(node)
@@ -913,7 +915,7 @@ class DataFlowGraphCreator(IRNodeVisitor):
 
     def visit_FieldRef(self, node: FieldRef, **kwargs: Any) -> None:
         field_name = node.name
-        kwargs["field_refs"].append(field_name)
+        self.field_refs.append(field_name)
 
         if "write_field" not in kwargs or kwargs["write_field"] == "":
             self.fields[field_name].intent = 1  # AccessKind.READ_WRITE
@@ -928,11 +930,12 @@ class DataFlowGraphCreator(IRNodeVisitor):
         )  # exclude sequential axis
 
     # def visit_VarRef(self, node: VarRef, **kwargs: Any) -> None:
-    #     kwargs["var_refs"].append(node.name)
+    #     self.var_refs.append(node.name)
 
     def visit_Assign(self, node: Assign, **kwargs: Any) -> None:
-        kwargs["field_refs"] = []
-        kwargs["var_refs"] = []
+        self.field_refs = []
+        self.var_refs = []
+
         kwargs["write_field"] = ""
         self.visit(node.target, **kwargs)
         kwargs["write_field"] = node.target.name
@@ -943,7 +946,7 @@ class DataFlowGraphCreator(IRNodeVisitor):
         print(f"{stage_name} => {target_name}")
         self.graph.add_edge(stage_name, target_name)
 
-        for field_name in kwargs["field_refs"]:
+        for field_name in self.field_refs:
             if target_name != field_name:
                 print(f"{field_name} => {target_name}")
                 self.graph.add_edge(field_name, target_name)

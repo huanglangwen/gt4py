@@ -21,16 +21,24 @@ import pytest
 
 import gt4py as gt
 from gt4py import backend as gt_backend
+from gt4py import definitions as gt_definitions
 from gt4py import gtscript
+from gt4py import stencil_builder as gt_builder
 from gt4py import storage as gt_storage
 
-from ..definitions import ALL_BACKENDS, CPU_BACKENDS, GPU_BACKENDS, INTERNAL_BACKENDS
+from ..definitions import (
+    ALL_BACKENDS,
+    CPU_BACKENDS,
+    GPU_BACKENDS,
+    INTERNAL_BACKENDS,
+    INTERNAL_CPU_BACKENDS,
+)
 from .stencil_definitions import EXTERNALS_REGISTRY as externals_registry
 from .stencil_definitions import REGISTRY as stencil_definitions
 
 
 @pytest.mark.parametrize(
-    ["name", "backend"], itertools.product(stencil_definitions.names, CPU_BACKENDS)
+    ["name", "backend"], itertools.product(stencil_definitions.names, INTERNAL_CPU_BACKENDS)
 )
 def test_generation_cpu(name, backend):
     stencil_definition = stencil_definitions[name]
@@ -91,7 +99,7 @@ def test_temporary_field_declared_in_if_raises():
 
 
 @pytest.mark.requires_gpu
-@pytest.mark.parametrize("backend", CPU_BACKENDS)
+@pytest.mark.parametrize("backend", INTERNAL_CPU_BACKENDS)
 def test_stage_without_effect(backend):
     @gtscript.stencil(backend=backend)
     def definition(field_a: gtscript.Field[np.float_]):
@@ -121,3 +129,21 @@ def test_ignore_np_errstate():
 
     with pytest.warns(RuntimeWarning, match="divide by zero encountered"):
         setup_and_run(backend="numpy", ignore_np_errstate=False)
+
+
+@pytest.mark.parametrize(
+    ["name", "backend"], itertools.product(stencil_definitions.names, INTERNAL_CPU_BACKENDS)
+)
+def test_cache_info(name, backend):
+    stencil_definition = stencil_definitions[name]
+    externals = externals_registry[name]
+    stencil = gtscript.stencil(backend, stencil_definition, externals=externals)
+
+    builder = gt_builder.StencilBuilder(
+        stencil_definition,
+        backend=gt_backend.from_name(backend),
+        options=gt_definitions.BuildOptions(name=name, module=stencil.options["module"]),
+    )
+    builder.with_externals(externals)
+
+    assert builder.caching.is_cache_info_available_and_consistent(validate_hash=True)

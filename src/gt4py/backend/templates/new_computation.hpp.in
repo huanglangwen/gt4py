@@ -29,6 +29,8 @@
 {%- if "cuda" in backend %}
 #include <cuda.h>
 #include <cuda_runtime.h>
+{%- else %}
+#include <cmath>
 {%- endif %}
 
 using py_size_t = std::intptr_t;

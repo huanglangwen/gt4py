@@ -929,9 +929,6 @@ class DataFlowGraphCreator(IRNodeVisitor):
             [(offset[0], offset[0]), (offset[1], offset[1]), (0, 0)]
         )  # exclude sequential axis
 
-    # def visit_VarRef(self, node: VarRef, **kwargs: Any) -> None:
-    #     self.var_refs.append(node.name)
-
     def visit_Assign(self, node: Assign, **kwargs: Any) -> None:
         self.field_refs = []
         self.var_refs = []
@@ -951,8 +948,6 @@ class DataFlowGraphCreator(IRNodeVisitor):
             if target_name != field_name:
                 print(f"{field_name} => {target_name}")
                 self.graph.add_edge(field_name, target_name)
-        # for var_name in self.var_refs:
-        #     self.graph.add_edge(target_name, var_name)
 
 
 create_dataflow_graph = DataFlowGraphCreator.apply

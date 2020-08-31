@@ -7,6 +7,7 @@ import numpy as np
 
 import gt4py.backend as gt_backend
 import gt4py.storage as gt_storage
+import gt4py.test_builder as gt_tb
 from gt4py.definitions import (
     AccessKind,
     Boundary,
@@ -314,9 +315,19 @@ class StencilObject(abc.ABC):
         if validate_args:
             self._validate_args(used_field_args, used_param_args, domain, origin)
 
+        debug_mode = "debug_mode" in self.options and self.options["debug_mode"]
+        if debug_mode:
+            test_builder = gt_tb.TestBuilder(self)
+            out_fields = test_builder.write_test(
+                self.backend, domain, origin, used_field_args, parameter_args
+            )
+
         self.run(
             _domain_=domain, _origin_=origin, exec_info=exec_info, **field_args, **parameter_args
         )
 
         if exec_info is not None:
             exec_info["call_run_end_time"] = time.perf_counter()
+
+        if debug_mode:
+            test_builder.write_output(out_fields)

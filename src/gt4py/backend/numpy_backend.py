@@ -14,6 +14,7 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+import copy
 import textwrap
 from typing import TYPE_CHECKING
 
@@ -348,6 +349,7 @@ def vectorized_ternary_op(*, condition, then_expr, else_expr, dtype):
         return source
 
     def generate_implementation(self):
+        self.numpy_module = self.backend_name
         block = gt_text.TextBlock(indent_size=self.TEMPLATE_INDENT_SIZE)
         self.source_generator(self.builder.implementation_ir, block)
         if self.builder.options.backend_opts.get("ignore_np_errstate", True):
@@ -396,3 +398,15 @@ class NumPyBackend(gt_backend.BaseBackend, gt_backend.PurePythonBackendCLIMixin)
     languages = {"computation": "python", "bindings": []}
 
     MODULE_GENERATOR_CLASS = NumPyModuleGenerator
+
+
+@gt_backend.register
+class BohriumBackend(NumPyBackend):
+    name = "bohrium"
+
+
+@gt_backend.register
+class CuPyBackend(NumPyBackend):
+    name = "cupy"
+    storage_info = copy.deepcopy(NumPyBackend.storage_info)
+    storage_info["device"] = "gpu"

@@ -435,6 +435,7 @@ class BaseModuleGenerator(abc.ABC):
     def __init__(self, builder: Optional["StencilBuilder"] = None):
         self._builder = builder
         self.args_data = {}
+        self.numpy_module = "numpy"
         with open(self.TEMPLATE_PATH, "r") as f:
             self.template = jinja2.Template(f.read())
 
@@ -503,6 +504,7 @@ class BaseModuleGenerator(abc.ABC):
             param_names=self.args_data["parameter_info"].keys(),
             pre_run=self.generate_pre_run(),
             post_run=self.generate_post_run(),
+            numpy_module=self.numpy_module,
             implementation=self.generate_implementation(),
         )
         module_source = gt_utils.text.format_source(

@@ -16,12 +16,16 @@
 
 import ast
 import inspect
+import logging
 import numbers
 import textwrap
 import types
 
+import networkx as nx
+
 import gt4py.gtscript as gtscript
 from gt4py.utils import NOTHING
+from gt4py.utils.attrib import AttrDict
 
 from .nodes import *
 
@@ -747,3 +751,155 @@ class AST2IRVisitor(ast.NodeVisitor):
 
 
 make_computations = AST2IRVisitor.apply
+
+
+class DataFlowGraphCreator(IRNodeVisitor):
+    @classmethod
+    def apply(cls, root_node: StencilImplementation) -> None:
+        return cls()(root_node)
+
+    def __call__(self, node) -> None:
+        self.graph = nx.DiGraph()
+        self.fields = dict()
+        self.total_size = 0
+        self.field_refs = []
+        self.var_refs = []
+        self.stage_names = []
+        self.create_logger()
+        self.visit(node)
+        return self
+
+    def create_logger(self, file_name: str = "") -> None:
+        formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+        logger = logging.getLogger("gt4py")
+        if file_name != "":
+            handler = logging.FileHandler(file_name, "a")
+            handler.setFormatter(formatter)
+            logger.addHandler(handler)
+        self.logger = logger
+
+    def add_node(self, field: AttrDict) -> None:
+        storage = field.storage
+        if storage is None:
+            dtype = str(field.dtype)
+            shape = str(field.mask)
+            strides = shape
+            size = 1
+        else:
+            dtype = str(storage.dtype)
+            shape = str(storage.shape)
+            strides = str(storage.strides)
+            size = storage.size
+
+        self.fields[field.name] = field
+        self.total_size += size
+        self.logger.debug(
+            f"Create storage node '{field.name}', of shape {shape}, size {size}, type {dtype}, and strides {strides}"
+        )
+
+    def save(self, filename: str):
+        g = self.graph
+        layout = nx.planar_layout(g)
+
+        perm_nodes = []
+        temp_nodes = []
+        node_labels = {}
+
+        for field in self.fields.values():
+            field_name = field.name
+            node_labels[field_name] = field_name
+            if field.is_temp:
+                temp_nodes.append(field_name)
+            else:
+                perm_nodes.append(field_name)
+
+        nx.draw_networkx_nodes(g, layout,
+                               nodelist=temp_nodes,
+                               node_color='w',
+                               node_shape='s',
+                               node_size=500,
+                               alpha=0.8,
+        )
+
+        nx.draw_networkx_nodes(g, layout,
+                               nodelist=perm_nodes,
+                               node_color='gray',
+                               node_shape='s',
+                               node_size = 500,
+                               alpha=0.8,
+        )
+
+        for stage_name in self.stage_names:
+            node_labels[stage_name] = stage_name
+
+        nx.draw_networkx_nodes(g, layout,
+                               nodelist=self.stage_names,
+                               node_color='gray',
+                               node_shape='v',
+                               node_size=500,
+                               alpha=0.8,
+        )
+
+        nx.draw_networkx_edges(g, layout, width=1.0)
+        nx.draw_networkx_labels(g, layout, node_labels, font_size=16)
+
+        import matplotlib.pyplot as plt
+        plt.axis("off")
+        plt.savefig(filename, with_labels=True)
+
+    def visit_Stage(self, node: Stage) -> None:
+        self.stage_names.append(node.name)
+        self.generic_visit(node)
+
+    def visit_FieldDecl(self, node: FieldDecl, **kwargs: Any) -> None:
+        mask = tuple([1 if ax in node.axes else 0 for ax in ("I", "J", "K")])
+        field = AttrDict(
+            name=node.name,
+            dtype=str(node.data_type).lower(),
+            mask=mask,
+            is_temp=not node.is_api,
+            intent=None,
+            extent=Extent.zeros(),
+            inputs=set(),
+            storage=None,
+        )
+        self.add_node(field)
+
+    def visit_FieldRef(self, node: FieldRef, **kwargs: Any) -> None:
+        field_name = node.name
+        self.field_refs.append(field_name)
+
+        if "write_field" not in kwargs or kwargs["write_field"] == "":
+            self.fields[field_name].intent = 1  # AccessKind.READ_WRITE
+        elif self.fields[field_name].intent is None:
+            self.fields[field_name].intent = 0  # AccessKind.READ_ONLY
+            if kwargs["write_field"] in self.fields:
+                self.fields[field_name].inputs.add(field_name)
+
+        offset = tuple(node.offset.values())
+        self.fields[field_name].extent |= Extent(
+            [(offset[0], offset[0]), (offset[1], offset[1]), (0, 0)]
+        )  # exclude sequential axis
+
+    def visit_Assign(self, node: Assign, **kwargs: Any) -> None:
+        self.field_refs = []
+        self.var_refs = []
+
+        kwargs["write_field"] = ""
+        self.visit(node.target, **kwargs)
+        kwargs["write_field"] = node.target.name
+        self.visit(node.value, **kwargs)
+
+        stage_name = self.stage_names[-1]
+        target_name = node.target.name
+        if target_name in self.fields:
+            print(f"{stage_name} => {target_name}")
+            self.graph.add_edge(stage_name, target_name)
+
+        for field_name in self.field_refs:
+            if target_name != field_name:
+                print(f"{field_name} => {target_name}")
+                self.graph.add_edge(field_name, target_name)
+
+
+create_dataflow_graph = DataFlowGraphCreator.apply

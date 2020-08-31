@@ -297,3 +297,12 @@ def attribkwclass(cls_or_none=None, **kwargs):
 
 def attributes_of(an_attribclass):
     return [a.name for a in attr.fields(an_attribclass)]
+
+
+class AttrDict(dict):
+    __getattr__ = dict.__getitem__
+    __setattr__ = dict.__setitem__
+
+    def __init__(self, *args, **kwargs):
+        super(AttrDict, self).__init__(*args, **kwargs)
+        self.__dict__ = self

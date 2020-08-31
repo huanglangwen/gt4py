@@ -132,21 +132,6 @@ class SIRConverter(gt_ir.IRNodeVisitor):
         # where the :code:`python_symbol` is defined.
         return self.OP_TO_CPP.get(op, op.python_symbol)  # type: ignore
 
-    def _make_pow_expr(self, left, right):
-        exponent = right.value
-        if exponent == "0":
-            return sir_utils.make_literal_access_expr("1", type=SIR.BuiltinType.Integer)
-        elif exponent == "1":
-            return sir_utils.make_unary_operator("+", left)
-        elif exponent == "2":
-            return sir_utils.make_binary_operator(left, "*", left)
-        elif exponent == "3":
-            return sir_utils.make_binary_operator(
-                left, "*", sir_utils.make_binary_operator(left, "*", left)
-            )
-        else:
-            return sir_utils.make_fun_call_expr("gridtools::dawn::math::pow", [left, right])
-
     def _update_field_extents(self, field_info: Dict[str, Any]) -> None:
         out_fields = [
             field
@@ -207,7 +192,7 @@ class SIRConverter(gt_ir.IRNodeVisitor):
         left = self.visit(node.lhs)
         right = self.visit(node.rhs)
         if node.op.python_symbol == "**":
-            sir = self._make_pow_expr(left, right)
+            sir = sir_utils.make_fun_call_expr("gridtools::dawn::math::pow", [left, right])
         else:
             op = self._make_operator(node.op)
             sir = sir_utils.make_binary_operator(left, op, right)
@@ -553,7 +538,6 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
                 )
         else:
             pass_groups = dawn4py.default_pass_groups()
-            pass_groups.append(dawn4py.PassGroup.MultiStageMerger)
 
         # If present, parse backend string
         dawn_backend = DAWN_CODEGEN_BACKENDS[self.DAWN_BACKEND_NAME or "GridTools"]
@@ -563,7 +547,6 @@ class BaseDawnBackend(gt_backend.BasePyExtBackend):
             for key, value in backend_opts.items()
             if key in _DAWN_TOOLCHAIN_OPTIONS.keys()
         }
-        dawn_opts["disable_k_caches"] = False
         source = dawn4py.compile(
             self.sir, groups=pass_groups, backend=dawn_backend, run_with_sync=False, **dawn_opts
         )

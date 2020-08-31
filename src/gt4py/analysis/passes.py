@@ -702,46 +702,12 @@ class DataTypePass(TransformPass):
 
         def visit_TernaryOpExpr(self, node: gt_ir.TernaryOpExpr, **kwargs):
             self.generic_visit(node, **kwargs)
-            assert (
-                type(node.then_expr) == gt_ir.BuiltinLiteral
-                or node.then_expr.data_type is not gt_ir.DataType.AUTO
-            )
-            assert (
-                type(node.else_expr) == gt_ir.BuiltinLiteral
-                or node.else_expr.data_type is not gt_ir.DataType.AUTO
-            )
+            assert node.then_expr.data_type is not gt_ir.DataType.AUTO
+            assert node.else_expr.data_type is not gt_ir.DataType.AUTO
             assert node.condition.data_type is not gt_ir.DataType.AUTO
-            if (
-                type(node.then_expr) == gt_ir.BuiltinLiteral
-                or type(node.else_expr) == gt_ir.BuiltinLiteral
-            ):
-                node.data_type = gt_ir.DataType.BOOL
-            else:
-                node.data_type = gt_ir.DataType.merge(
-                    node.then_expr.data_type, node.else_expr.data_type
-                )
-
-        def visit_NativeFuncCall(self, node: gt_ir.NativeFuncCall, **kwargs):
-            self.generic_visit(node.args, **kwargs)
-
-            # Collect data types from each argument
-            data_type = set([arg.data_type for arg in node.args])
-            if len(data_type) > 1:
-                data_type -= {gt_ir.DataType.DEFAULT}
-
-            # Assert that all data types are the same
-            assert len(data_type) == 1
-            data_type = data_type.pop()
-
-            if node.func in (
-                gt_ir.NativeFunction.MIN,
-                gt_ir.NativeFunction.MAX,
-                gt_ir.NativeFunction.ABS,
-                gt_ir.NativeFunction.MOD,
-            ):
-                node.data_type = data_type
-            else:
-                node.data_type = gt_ir.DataType.DEFAULT
+            node.data_type = gt_ir.DataType.merge(
+                node.then_expr.data_type, node.else_expr.data_type
+            )
 
         def visit_NativeFuncCall(self, node: gt_ir.NativeFuncCall, **kwargs):
             self.generic_visit(node.args, **kwargs)

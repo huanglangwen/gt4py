@@ -62,7 +62,7 @@ class TestBuilder:
         for field_idx, field_arg in enumerate(field_args):
             field = field_args[field_arg]
             str_io = io.StringIO()
-            np.savetxt(str_io, field.data.flatten())
+            np.savetxt(str_io, np.asarray(field.data).flatten())
 
             data_path = os.path.join(data_dir, f"{field_arg}.csv")
             data_file = open(data_path, "w")
@@ -124,6 +124,6 @@ class TestBuilder:
         for out_field in out_fields:
             if overwrite or not os.path.exists(out_field["path"]):
                 str_io = io.StringIO()
-                np.savetxt(str_io, out_field["data"].data.flatten())
+                np.savetxt(str_io, np.asarray(out_field["data"].data).flatten())
                 data_file = open(out_field["path"], "w")
                 data_file.write(str_io.getvalue().rstrip().replace("\n", ","))

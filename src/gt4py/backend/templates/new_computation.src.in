@@ -289,10 +289,10 @@ void run(const std::array<uint_t, ndim>& domain,
     const uint_t k_block_size = 1;
     {%- endif %}
 
-    // dim3 gdim(i_block_size, j_block_size, k_block_size);
-    // dim3 bdim({{ block_sizes[0] }}, {{ block_sizes[1] }} + {{ extra_threads }}, 1);
-    dim3 gdim(1, 1, 1);
-    dim3 bdim(1, 1, 1);
+    dim3 gdim(i_block_size, j_block_size, k_block_size);
+    dim3 bdim({{ block_sizes[0] }}, {{ block_sizes[1] }} + {{ extra_threads }}, 1);
+    // dim3 gdim(1, 1, 1);
+    // dim3 bdim(1, 1, 1);
     {%- if debug %}
     printf("DEBUG: gdim = (%d,%d,%d)\n", i_block_size, j_block_size, k_block_size);
     printf("DEBUG: bdim = (%d,%d,%d)\n", {{ block_sizes[0] }}, {{ block_sizes[1] }} + {{ extra_threads }}, 1);

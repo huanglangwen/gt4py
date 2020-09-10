@@ -32,8 +32,6 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
     }
     COMPUTATION_FILES = ["computation.hpp", "computation.src"]
     BINDINGS_FILES = ["bindings.cpp"]
-
-    ITERATORS = ("i", "j", "k")
     BLOCK_SIZES = (32, 8, 1)
 
     def __init__(self, class_name, module_name, gt_backend_t, options):
@@ -77,8 +75,9 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
         offset = [node.offset.get(name, 0) for name in self.domain.axes_names]
 
         iter_tuple = []
+        iterators = [iter.lower() for iter in gt_definitions.CartesianSpace.names]
         for i in range(len(offset)):
-            iter = OptExtGenerator.ITERATORS[i]
+            iter = iterators[i]
             if offset[i] != 0:
                 oper = ""
                 if offset[i] > 0:

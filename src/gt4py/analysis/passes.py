@@ -683,6 +683,8 @@ class StageMergingWrapper:
         return False
 
     def has_data_dependencies_with(self, candidate: "StageMergingWrapper") -> bool:
+        if self.parent_block.iteration_order != gt_ir.IterationOrder.PARALLEL:
+            return False
         extents = (extent for name, extent in candidate.inputs.items() if name in self.outputs)
         for extent in extents:
             read_interval = (

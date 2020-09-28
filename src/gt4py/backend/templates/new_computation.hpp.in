@@ -19,16 +19,21 @@
     - arg_fields: [{ "name": str, "dtype": str, "layout_id": int }]
     - parameters: [{ "name": str, "dtype": str }]
     - stencil_unique_name: str
+    - gt_backend: str
     - max_ndim: int
+    - profile: bool
 #}
 
 #include <gridtools/common/defs.hpp>
 
 #include <array>
 #include <vector>
-{%- if "cuda" in backend %}
+{%- if "cuda" in gt_backend %}
 #include <cuda.h>
 #include <cuda_runtime.h>
+{%- if profile %}
+#include <cuda_profiler_api.h>
+{%- endif %}
 {%- else %}
 #include <cmath>
 {%- endif %}

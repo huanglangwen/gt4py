@@ -49,6 +49,7 @@
     - extra_threads: int
     - do_k_parallel: bool
     - debug: bool
+    - profile: bool
 #}
 
 #include "computation.hpp"
@@ -238,6 +239,10 @@ void run(const std::array<uint_t, ndim>& domain,
 
 {# --- CUDA --- #}
 {%- if "cuda" in gt_backend %}
+{%- if profile -%}
+cudaProfilerStart();
+{%- endif -%}
+
 {% for multi in multi_stages %}
     {
     const uint_t i_size = i_max - i_min + 1;
@@ -290,6 +295,9 @@ void run(const std::array<uint_t, ndim>& domain,
     {%- set extra_indent=0 %}
     }
 {% endfor %}
+{%- if profile -%}
+cudaProfilerStop();
+{%- endif -%}
 {# --- C++ --- #}
 {%- else %}
     const auto data_strides = {{ arg_fields[0].name }}_ds.strides;

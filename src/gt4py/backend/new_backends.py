@@ -243,6 +243,7 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
             extra_threads=extra_threads,
             do_k_parallel=False,
             debug=False,
+            profile=True,
         )
 
         sources: Dict[str, Dict[str, str]] = {"computation": {}, "bindings": {}}

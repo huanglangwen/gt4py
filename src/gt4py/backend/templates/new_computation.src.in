@@ -97,11 +97,9 @@ data_store_t<DataType> make_temp_store(const std::array<uint_t, ndim>& domain,
                                        const std::string& axes) {
     // Compute dims, strides, and size
     const std::string all_axes = "ijk";
+    std::array<uint_t, ndim> dims = {1, 1, 1};
+    std::array<uint_t, ndim> strides = {1, 1, 1};
     uint_t size = 1;
-    std::array<uint_t, ndim> dims;
-    dims.fill(1);
-    std::array<uint_t, ndim> strides;
-    strides.fill(1);
 
     for(int i = ndim - 1; i >= 0; --i) {
       if(axes.find(all_axes[i]) != std::string::npos)

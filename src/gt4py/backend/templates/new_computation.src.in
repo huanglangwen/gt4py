@@ -16,7 +16,7 @@
 
  ---- Template variables ----
 
-    - arg_fields: [{ "name": str, "dtype": str, "layout_id": int }]
+    - arg_fields: [{ "name": str, "dtype": str, "axes": str, "layout_id": int }]
     - constants: { name:str : str }
     - gt_backend: str
     - halo_sizes: [int]
@@ -41,7 +41,7 @@
         }]}]
     - parameters: [{ "name": str, "dtype": str }]
     - stencil_unique_name: str
-    - tmp_fields: [{ "name": str, "dtype": str }]
+    - tmp_fields: [{ "name": str, "dtype": str, "axes": str }]
     - access_vars: [{ "name": str, "expr": str, "itype": str, "stages": [str] }]
     - block_sizes: [int]
     - max_extents: [int]
@@ -93,13 +93,19 @@ data_store_t<DataType> make_data_store(const BufferInfo& bi,
 {% if tmp_fields -%}
 template<typename DataType>
 data_store_t<DataType> make_temp_store(const std::array<uint_t, ndim>& domain,
-                                       const std::array<uint_t, ndim>& origin) {
+                                       const std::array<uint_t, ndim>& origin,
+                                       const std::string& axes) {
     // Compute dims, strides, and size
+    const std::string all_axes = "ijk";
     uint_t size = 1;
-    std::array<uint_t, ndim> dims{};
-    std::array<uint_t, ndim> strides{};
+    std::array<uint_t, ndim> dims;
+    dims.fill(1);
+    std::array<uint_t, ndim> strides;
+    strides.fill(1);
+
     for(int i = ndim - 1; i >= 0; --i) {
-      dims[i] = domain[i] + 2 * origin[i];
+      if(axes.find(all_axes[i]) != std::string::npos)
+          dims[i] = domain[i] + 2 * origin[i];
       strides[i] = size;
       size *= dims[i];
     }
@@ -215,7 +221,7 @@ void run(const std::array<uint_t, ndim>& domain,
 {% if tmp_fields -%}
     // Allocate temporary storages
 {%- for field in tmp_fields %}
-    auto {{ field.name }}_ds = make_temp_store<{{ field.dtype }}>(domain, min_origin);
+    auto {{ field.name }}_ds = make_temp_store<{{ field.dtype }}>(domain, min_origin, "{{ field.axes }}");
 {%- endfor %}
 {%- endif %}
     const int i_min = min_origin[0];

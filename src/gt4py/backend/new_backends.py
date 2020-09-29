@@ -72,7 +72,7 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
 
     def visit_FieldRef(self, node: gt_ir.FieldRef, **kwargs):
         assert node.name in self.apply_block_symbols
-        offset = [node.offset.get(name, 0) for name in self.domain.axes_names]
+        offset = [node.offset.get(name, 0) for name in node.offset]
 
         iter_tuple = []
         iterators = [iter.lower() for iter in gt_definitions.CartesianSpace.names]
@@ -151,6 +151,7 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
                 field_attributes = {
                     "name": field_decl.name,
                     "dtype": self._make_cpp_type(field_decl.data_type),
+                    "axes": "".join(field_decl.axes).lower(),
                 }
                 if field_decl.is_api:
                     if field_decl.layout_id not in storage_ids:

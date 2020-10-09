@@ -1203,6 +1203,70 @@ class DemoteLocalTemporariesToVariablesPass(TransformPass):
         return transform_data
 
 
+class TemporaryInliningPass(TransformPass):
+    class CountTemporaries(gt_ir.IRNodeVisitor):
+        def __call__(self, node: gt_ir.StencilImplementation) -> Dict[str, int]:
+            assert isinstance(node, gt_ir.StencilImplementation)
+            self.temp_counts = {field_name: 0 for field_name in node.temporary_fields}
+            self.visit(node)
+            return self.temp_counts
+
+        def visit_FieldRef(self, node: gt_ir.FieldRef) -> None:
+            if node.name in self.temp_counts:
+                self.temp_counts[node.name] += 1
+
+        def visit_VarRef(self, node: gt_ir.FieldRef) -> None:
+            if node.name not in self.temp_counts:
+                self.temp_counts[node.name] = 0
+            self.temp_counts[node.name] += 1
+
+    class TemporaryInliner(gt_ir.IRNodeMapper):
+        def __init__(self, temp_counts: Dict[str, int]):
+            self.iir = None
+            self.temp_counts = temp_counts
+
+        def __call__(self, node: gt_ir.StencilImplementation) -> gt_ir.StencilImplementation:
+            assert isinstance(node, gt_ir.StencilImplementation)
+            return self.visit(node)
+
+        def visit_StencilImplementation(
+            self, path: tuple, node_name: str, node: gt_ir.StencilImplementation
+        ) -> gt_ir.StencilImplementation:
+            self.iir = node
+            return self.generic_visit(path, node_name, node)
+
+        def visit_Assign(self, path: tuple, node_name: str, node: gt_ir.Assign):
+            # self.visit(node.value)
+            # self.visit(node.target)
+            if node_name in self.temp_counts:
+                stop=1
+
+            return True, node
+
+        def visit_FieldRef(
+            self, path: tuple, node_name: str, node: gt_ir.FieldRef
+        ) -> Tuple[bool, gt_ir.FieldRef]:
+            field_name = node.name
+            is_full_field = False
+
+            return True, node
+
+        def visit_VarRef(
+            self, path: tuple, node_name: str, node: gt_ir.VarRef
+        ) -> Tuple[bool, gt_ir.FieldRef]:
+            var_name = node.name
+
+            return True, node
+
+    def apply(self, transform_data: TransformData) -> TransformData:
+        count_temporaries = self.CountTemporaries()
+        temp_counts = count_temporaries(transform_data.implementation_ir)
+
+        temporary_inliner = self.TemporaryInliner(temp_counts)
+        transform_data.implementation_ir = temporary_inliner(transform_data.implementation_ir)
+        return transform_data
+
+
 class HousekeepingPass(TransformPass):
     class WarnIfNoEffect(gt_ir.IRNodeVisitor):
         def __call__(self, stencil_name: str, node: gt_ir.StencilImplementation) -> None:

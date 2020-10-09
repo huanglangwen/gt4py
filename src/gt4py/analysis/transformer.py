@@ -32,6 +32,7 @@ from .passes import (
     InitInfoPass,
     MergeBlocksPass,
     NormalizeBlocksPass,
+    TemporaryInliningPass,
 )
 
 
@@ -118,6 +119,10 @@ class IRTransformer:
         # into local scalars
         demote_local_temporaries_to_variables_pass = DemoteLocalTemporariesToVariablesPass()
         demote_local_temporaries_to_variables_pass.apply(self.transform_data)
+
+        # Inline temporary variables by replacing them with the code that generates them
+        temporary_inlining_pass = TemporaryInliningPass()
+        temporary_inlining_pass.apply(self.transform_data)
 
         # prune some stages that don't have effect
         housekeeping_pass = HousekeepingPass()

@@ -38,7 +38,8 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
         super().__init__(class_name, module_name, gt_backend_t, options)
         self.access_map_ = dict()
         self.tmp_fields_ = dict()
-        self.curr_stage_ = ""
+        self.curr_stage_: str = ""
+        self.last_interval: List[Dict[str, int]] = list()
 
     def _compute_max_threads(self, block_sizes: tuple, max_extent: gt_definitions.Extent):
         max_threads = 0
@@ -125,7 +126,44 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
 
     def visit_Stage(self, node: gt_ir.Stage):
         self.curr_stage_ = node.name
-        return super().visit_Stage(node)
+        stage_data = super().visit_Stage(node)
+        stage_data["name"] = node.name
+        fuse_k_loops = "cuda" not in self.gt_backend_t
+
+        extents: List[int] = []
+        compute_extent = node.compute_extent
+        for i in range(compute_extent.ndims):
+            extents.extend(
+                [compute_extent.lower_indices[i], compute_extent.upper_indices[i]]
+            )
+        stage_data["extents"] = extents
+
+        stages: List[Dict[str, Any]] = list()
+        for i in range(len(node.apply_blocks)):
+            apply_block = node.apply_blocks[i]
+            region = stage_data["regions"][i]
+            sub_stage = stage_data.copy()
+            sub_stage["regions"] = [region]
+
+            interval_start = apply_block.interval.start
+            start_level = (
+                "min" if interval_start.level == gt_ir.LevelMarker.START else "max"
+            )
+            interval_end = apply_block.interval.end
+            end_level = (
+                "min" if interval_end.level == gt_ir.LevelMarker.START else "max"
+            )
+            interval = [
+                dict(level=start_level, offset=interval_start.offset),
+                dict(level=end_level, offset=interval_end.offset),
+            ]
+
+            sub_stage["interval"] = interval if interval != self.last_interval else []
+            stages.append(sub_stage)
+            if fuse_k_loops:
+                last_interval = interval
+
+        return stages
 
     def visit_StencilImplementation(self, node: gt_ir.StencilImplementation):
         max_extent = functools.reduce(
@@ -168,57 +206,23 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
             if name not in node.unreferenced
         ]
 
-        multi_stages = []
+        multi_stages: List[Dict[str, Any]] = list()
         for multi_stage in node.multi_stages:
-            steps: List[Dict[str, Any]] = []
-            last_interval: List[Dict[str, Any]] = []
+            stages: List[Dict[str, Any]] = list()
+            self.last_interval.clear()
 
-            n_multi_stages = 0
             for group in multi_stage.groups:
                 for stage in group.stages:
-                    stage_start = stage.apply_blocks[0].interval.start
-                    start_level = "min" if stage_start.level == gt_ir.LevelMarker.START else "max"
-                    stage_end = stage.apply_blocks[0].interval.end
-                    end_level = "min" if stage_end.level == gt_ir.LevelMarker.START else "max"
-                    interval = [
-                        dict(level=start_level, offset=stage_start.offset),
-                        dict(level=end_level, offset=stage_end.offset),
-                    ]
-
-                    # Force a new multi-stage when intervals change...
-                    if len(last_interval) > 0 and interval != last_interval:
-                        if last_interval[1]["level"] == "min":
-                            last_interval[1]["offset"] -= 1
-                        multi_stages.append(
-                            {
-                                "name": f"{multi_stage.name}_{n_multi_stages}",
-                                "exec": str(multi_stage.iteration_order).lower(),
-                                "interval": last_interval,
-                                "steps": steps,
-                            }
-                        )
-                        n_multi_stages += 1
-                        steps.clear()
-                    last_interval = interval
-
-                    extents: List[int] = []
-                    compute_extent = stage.compute_extent
-                    for i in range(compute_extent.ndims):
-                        extents.extend(
-                            [compute_extent.lower_indices[i], compute_extent.upper_indices[i]]
-                        )
-
-                    step = self.visit(stage)
-                    step["stage_name"] = stage.name
-                    step["extents"] = extents
-                    steps.append(step)
+                    # TODO: Why did I have this here?
+                    # if last_interval[1]["level"] == "min":
+                    #     last_interval[1]["offset"] -= 1
+                    stages.extend(self.visit(stage))
 
             multi_stages.append(
                 {
-                    "name": f"{multi_stage.name}_{n_multi_stages}",
+                    "name": f"{multi_stage.name}",
                     "exec": str(multi_stage.iteration_order).lower(),
-                    "interval": last_interval,
-                    "steps": steps,
+                    "stages": stages,
                 }
             )
 

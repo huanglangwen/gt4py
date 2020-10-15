@@ -21,8 +21,8 @@
     - gt_backend: str
     - halo_sizes: [int]
     - max_ndim: int
-    - multi_stages: [{ "name": str, "exec": str, "interval": [{ "level": str, "offset": int }], "steps": [{
-            "stage_name": str,
+    - multi_stages: [{ "name": str, "exec": str, "interval": [{ "level": str, "offset": int }], "stages": [{
+            "name": str,
             "args": [
                 {
                     "name": str
@@ -102,10 +102,11 @@ data_store_t<DataType> make_temp_store(const std::array<uint_t, ndim>& domain,
     uint_t size = 1;
 
     for(int i = ndim - 1; i >= 0; --i) {
-      if(axes.find(all_axes[i]) != std::string::npos)
-          dims[i] = domain[i] + 2 * origin[i];
-      strides[i] = size;
-      size *= dims[i];
+        if(axes.find(all_axes[i]) != std::string::npos) {
+            dims[i] = domain[i] + 2 * origin[i];
+        }
+        strides[i] = size;
+        size *= dims[i];
     }
 
     // Allocate pointer
@@ -168,18 +169,18 @@ __global__ void __launch_bounds__({{ max_threads }}) {{ multi.name }}_kernel(
     {%- endfor %}
 
     int i, j, k;
-{%- for step in multi.steps %}
-    // {{ step.stage_name }}
+{%- for stage in multi.stages %}
+    // {{ stage.name }}
     {%- if multi.exec == "backward" %}
-    for (k = k_{{ multi.interval[1].level }} + {{ multi.interval[1].offset }} + {{ step.extents[5] }} + k_block; k >= k_{{ multi.interval[0].level }} + {{ multi.interval[0].offset }} + {{ step.extents[4] }}; k -= k_inc) {
+    for (k = k_{{ stage.interval[1].level }} + {{ stage.interval[1].offset }} + {{ stage.extents[5] }} + k_block; k >= k_{{ stage.interval[0].level }} + {{ stage.interval[0].offset }} + {{ stage.extents[4] }}; k -= k_inc) {
     {%- else %}
-    for (k = k_{{ multi.interval[0].level }} + {{ multi.interval[0].offset }} + {{ step.extents[4] }} + k_block; k <= k_{{ multi.interval[1].level }} + {{ multi.interval[1].offset }} + {{ step.extents[5] }}; k += k_inc) {
+    for (k = k_{{ stage.interval[0].level }} + {{ stage.interval[0].offset }} + {{ stage.extents[4] }} + k_block; k <= k_{{ stage.interval[1].level }} + {{ stage.interval[1].offset }} + {{ stage.extents[5] }}; k += k_inc) {
     {%- endif %}
-      {%- for region in step.regions %}
-      for (i = i_min + {{ step.extents[0] }} + i_block; i <= i_max + {{ step.extents[1] }}; i += i_inc) {
-        for (j = j_min + {{ step.extents[2] }} + j_block; j <= j_max + {{ step.extents[3] }}; j += j_inc) {
+      {%- for region in stage.regions %}
+      for (i = i_min + {{ stage.extents[0] }} + i_block; i <= i_max + {{ stage.extents[1] }}; i += i_inc) {
+        for (j = j_min + {{ stage.extents[2] }} + j_block; j <= j_max + {{ stage.extents[3] }}; j += j_inc) {
         {%- for access in access_vars %}
-          {%- if step.stage_name in access.stages %}
+          {%- if stage.name in access.stages %}
           {{ access.name }} = {{ access.expr }};
           {%- endif -%}
         {%- endfor %}
@@ -188,7 +189,6 @@ __global__ void __launch_bounds__({{ max_threads }}) {{ multi.name }}_kernel(
       }
       {%- endfor %}
     }
-    {# %- if multi.steps|length > 1 % #}
     {%- if not loop.last %}
     __syncthreads();
     {%- endif -%}
@@ -318,32 +318,39 @@ cudaProfilerStop();
     {{ access.itype }} {{ access.name }} = 0;
 {%- endfor %}
 {% for multi in multi_stages %}
-    // {{ multi.name }}
+    // {{ multi.name }}:
+{%- for stage in multi.stages %}
+      // {{ stage.name }}:
+{%- if stage.interval|length > 0 %}
 {%- if multi.exec == "parallel" %}
     #pragma omp parallel for schedule(runtime)
 {%- endif %}
 {%- if multi.exec == "backward" %}
-    for (int k = k_{{ multi.interval[1].level }} + {{ multi.interval[1].offset }} + {{ multi.steps[0].extents[5] }}; k >= k_{{ multi.interval[0].level }} + {{ multi.interval[0].offset }} + {{ multi.steps[0].extents[4] }}; --k) {
+    for (int k = k_{{ stage.interval[1].level }} + {{ stage.interval[1].offset }} + {{ stage.extents[5] }}; k >= k_{{ stage.interval[0].level }} + {{ stage.interval[0].offset }} + {{ stage.extents[4] }}; --k) {
 {%- else %}
-    for (int k = k_{{ multi.interval[0].level }} + {{ multi.interval[0].offset }} + {{ multi.steps[0].extents[4] }}; k <= k_{{ multi.interval[1].level }} + {{ multi.interval[1].offset }} + {{ multi.steps[0].extents[5] }}; ++k) {
+    for (int k = k_{{ stage.interval[0].level }} + {{ stage.interval[0].offset }} + {{ stage.extents[4] }}; k <= k_{{ stage.interval[1].level }} + {{ stage.interval[1].offset }} + {{ stage.extents[5] }}; ++k) {
 {%- endif %}
-{%- for step in multi.steps %}
-      // {{ step.stage_name }}:
-    {%- for region in step.regions %}
-      for (int i = i_min + {{ step.extents[0] }}; i <= i_max + {{ step.extents[1] }}; ++i) {
+{%- endif %}
+    {%- for region in stage.regions %}
+{%- if multi.exec != "parallel" %}
+      #pragma omp parallel for schedule(runtime)
+{%- endif %}
+      for (int i = i_min + {{ stage.extents[0] }}; i <= i_max + {{ stage.extents[1] }}; ++i) {
         #pragma omp simd
-        for (int j = j_min + {{ step.extents[2] }}; j <= j_max + {{ step.extents[3] }}; ++j) {
+        for (int j = j_min + {{ stage.extents[2] }}; j <= j_max + {{ stage.extents[3] }}; ++j) {
         {%- for access in access_vars %}
-          {%- if step.stage_name in access.stages %}
+          {%- if stage.name in access.stages %}
             {{ access.name }} = {{ access.expr }};
           {%- endif -%}
-{%- endfor %}
+        {%- endfor %}
           {{ region.body }}
         }
       }
     {%- endfor %}
-{%- endfor %}
+{%- if loop.last or multi.stages[loop.index].interval|length > 0 %}
     }
+{%- endif %}
+{%- endfor %}
 {% endfor %}
 {%- endif %}
 

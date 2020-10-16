@@ -161,7 +161,7 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
             sub_stage["interval"] = interval if interval != self.last_interval else []
             stages.append(sub_stage)
             if fuse_k_loops:
-                last_interval = interval
+                self.last_interval = interval
 
         return stages
 

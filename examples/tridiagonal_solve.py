@@ -14,13 +14,13 @@ except ImportError:
     cp = None
 
 
-py_backend = "numpy"
 # py_backend = 'debug'
 cpu_backend = "cxxopt"
 gpu_backend = "cuda"
+py_backend = "numpy"
 # cpu_backend = 'gtmc'
 # gpu_backend = 'gtcuda'
-rebuild = True  # False
+rebuild = True  # True
 managed_mem = False  # True
 
 Field3D = gtscript.Field[float]

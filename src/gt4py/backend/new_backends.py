@@ -16,7 +16,7 @@
 
 import functools
 import subprocess as sub
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 from gt4py import backend as gt_backend
 from gt4py import definitions as gt_definitions
@@ -36,10 +36,11 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
 
     def __init__(self, class_name, module_name, gt_backend_t, options):
         super().__init__(class_name, module_name, gt_backend_t, options)
-        self.access_map_ = dict()
-        self.tmp_fields_ = dict()
+        self.access_map_: Dict[str, Any] = dict()
+        self.tmp_fields_: Dict[str, bool] = dict()
         self.curr_stage_: str = ""
-        self.last_interval: List[Dict[str, int]] = list()
+        self.last_interval_: List[Dict[str, int]] = list()
+        self.fuse_k_loops_ = "cuda" not in self.gt_backend_t
 
     def _compute_max_threads(self, block_sizes: tuple, max_extent: gt_definitions.Extent):
         max_threads = 0
@@ -78,14 +79,12 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
         iter_tuple = []
         iterators = [iter.lower() for iter in gt_definitions.CartesianSpace.names]
         for i in range(len(offset)):
-            iter = iterators[i]
+            iterator = iterators[i]
             if offset[i] != 0:
-                oper = ""
-                if offset[i] > 0:
-                    oper = "+"
-                iter_tuple.append(iter + oper + str(offset[i]))
+                operator = "+" if offset[i] > 0 else ""
+                iter_tuple.append(iterator + operator + str(offset[i]))
             else:
-                iter_tuple.append(iter)
+                iter_tuple.append(iterator)
 
         data_type = "temp" if node.name in self.tmp_fields_ else "data"
         idx_key = f"{data_type}_" + "".join(iter_tuple)
@@ -100,7 +99,6 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
             )
 
         self.access_map_[idx_key]["stages"].add(self.curr_stage_)
-
         return node.name + "[" + self.access_map_[idx_key]["name"] + "]"
 
     def visit_VarRef(self, node: gt_ir.VarRef, *, write_context=False):
@@ -128,40 +126,43 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
         self.curr_stage_ = node.name
         stage_data = super().visit_Stage(node)
         stage_data["name"] = node.name
-        fuse_k_loops = "cuda" not in self.gt_backend_t
+        stage_data["extents"]: List[int] = []
 
-        extents: List[int] = []
         compute_extent = node.compute_extent
         for i in range(compute_extent.ndims):
-            extents.extend(
+            stage_data["extents"].extend(
                 [compute_extent.lower_indices[i], compute_extent.upper_indices[i]]
             )
-        stage_data["extents"] = extents
 
         stages: List[Dict[str, Any]] = list()
         for i in range(len(node.apply_blocks)):
             apply_block = node.apply_blocks[i]
-            region = stage_data["regions"][i]
-            sub_stage = stage_data.copy()
-            sub_stage["regions"] = [region]
-
             interval_start = apply_block.interval.start
-            start_level = (
-                "min" if interval_start.level == gt_ir.LevelMarker.START else "max"
-            )
+            start_level = "min" if interval_start.level == gt_ir.LevelMarker.START else "max"
+            start_offset = interval_start.offset
+
             interval_end = apply_block.interval.end
-            end_level = (
-                "min" if interval_end.level == gt_ir.LevelMarker.START else "max"
-            )
+            end_level = "min" if interval_end.level == gt_ir.LevelMarker.START else "max"
+            end_offset = interval_end.offset
+
+            # TODO: Determine why this is needed...
+            if end_level == "min" and end_offset > 0:
+                end_offset -= 1
+            elif start_level == "max" and start_offset < 0:
+                start_offset += 1
+
             interval = [
-                dict(level=start_level, offset=interval_start.offset),
-                dict(level=end_level, offset=interval_end.offset),
+                dict(level=start_level, offset=start_offset),
+                dict(level=end_level, offset=end_offset),
             ]
 
-            sub_stage["interval"] = interval if interval != self.last_interval else []
+            sub_stage = stage_data.copy()
+            sub_stage["regions"] = [stage_data["regions"][i]]
+            sub_stage["interval"] = interval if interval != self.last_interval_ else []
             stages.append(sub_stage)
-            if fuse_k_loops:
-                self.last_interval = interval
+
+            if self.fuse_k_loops_:
+                self.last_interval_ = interval.copy()
 
         return stages
 
@@ -169,18 +170,20 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
         max_extent = functools.reduce(
             lambda a, b: a | b, node.fields_extents.values(), gt_definitions.Extent.zeros()
         )
-        halo_sizes = tuple(max(lower, upper) for lower, upper in max_extent.to_boundary())
-        constants = {}
+        halo_sizes: Tuple[int] = tuple(
+            max(lower, upper) for lower, upper in max_extent.to_boundary()
+        )
+        constants: Dict[str, str] = {}
         if node.externals:
             for name, value in node.externals.items():
                 value = self._make_cpp_value(name)
                 if value is not None:
                     constants[name] = value
 
-        arg_fields = []
-        tmp_fields = []
-        storage_ids = []
-        block_sizes = self.BLOCK_SIZES
+        arg_fields: List[any] = []
+        tmp_fields: List[str] = []
+        storage_ids: List[int] = []
+        block_sizes: List[int] = self.BLOCK_SIZES
 
         max_ndim = 0
         for name, field_decl in node.fields.items():
@@ -209,13 +212,10 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
         multi_stages: List[Dict[str, Any]] = list()
         for multi_stage in node.multi_stages:
             stages: List[Dict[str, Any]] = list()
-            self.last_interval.clear()
+            self.last_interval_.clear()
 
             for group in multi_stage.groups:
                 for stage in group.stages:
-                    # TODO: Why did I have this here?
-                    # if last_interval[1]["level"] == "min":
-                    #     last_interval[1]["offset"] -= 1
                     stages.extend(self.visit(stage))
 
             multi_stages.append(

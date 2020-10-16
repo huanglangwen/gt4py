@@ -157,8 +157,9 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
             ]
 
             sub_stage = stage_data.copy()
-            sub_stage["regions"] = [stage_data["regions"][i]]
+            sub_stage["body"] = sub_stage["regions"][i]["body"]
             sub_stage["interval"] = interval if interval != self.last_interval_ else []
+            del sub_stage["regions"]
             stages.append(sub_stage)
 
             if self.fuse_k_loops_:
@@ -185,7 +186,7 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
         storage_ids: List[int] = []
         block_sizes: List[int] = self.BLOCK_SIZES
 
-        max_ndim = 0
+        max_ndim: int = 0
         for name, field_decl in node.fields.items():
             if name not in node.unreferenced:
                 max_ndim = max(max_ndim, len(field_decl.axes))
@@ -203,7 +204,7 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
                     tmp_fields.append(field_attributes)
                     self.tmp_fields_[name] = True
 
-        parameters = [
+        parameters: List[Dict[str, Any]] = [
             {"name": parameter.name, "dtype": self._make_cpp_type(parameter.data_type)}
             for name, parameter in node.parameters.items()
             if name not in node.unreferenced

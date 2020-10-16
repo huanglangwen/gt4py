@@ -21,7 +21,8 @@
     - gt_backend: str
     - halo_sizes: [int]
     - max_ndim: int
-    - multi_stages: [{ "name": str, "exec": str, "interval": [{ "level": str, "offset": int }], "stages": [{
+    - multi_stages: [{ "name": str, "exec": str,
+        "stages": [{
             "name": str,
             "args": [
                 {
@@ -30,13 +31,8 @@
                     "extent": [int] | None
                 }
             ],
-            "regions": [
-                {
-                    "interval_start": (level:int, offset:int),
-                    "interval_end": (level:int, offset:int),
-                    "body": str
-                }
-            ],
+            "interval": [{ "level": str, "offset": int }],
+            "body": str,
             "extents": [int]
         }]}]
     - parameters: [{ "name": str, "dtype": str }]
@@ -176,7 +172,6 @@ __global__ void __launch_bounds__({{ max_threads }}) {{ multi.name }}_kernel(
     {%- else %}
     for (k = k_{{ stage.interval[0].level }} + {{ stage.interval[0].offset }} + {{ stage.extents[4] }} + k_block; k <= k_{{ stage.interval[1].level }} + {{ stage.interval[1].offset }} + {{ stage.extents[5] }}; k += k_inc) {
     {%- endif %}
-      {%- for region in stage.regions %}
       for (i = i_min + {{ stage.extents[0] }} + i_block; i <= i_max + {{ stage.extents[1] }}; i += i_inc) {
         for (j = j_min + {{ stage.extents[2] }} + j_block; j <= j_max + {{ stage.extents[3] }}; j += j_inc) {
         {%- for access in access_vars %}
@@ -184,10 +179,9 @@ __global__ void __launch_bounds__({{ max_threads }}) {{ multi.name }}_kernel(
           {{ access.name }} = {{ access.expr }};
           {%- endif -%}
         {%- endfor %}
-          {{ region.body }}
+          {{ stage.body }}
         }
       }
-      {%- endfor %}
     }
     {%- if not loop.last %}
     __syncthreads();
@@ -331,7 +325,6 @@ cudaProfilerStop();
     for (int k = k_{{ stage.interval[0].level }} + {{ stage.interval[0].offset }} + {{ stage.extents[4] }}; k <= k_{{ stage.interval[1].level }} + {{ stage.interval[1].offset }} + {{ stage.extents[5] }}; ++k) {
 {%- endif %}
 {%- endif %}
-    {%- for region in stage.regions %}
 {%- if multi.exec != "parallel" %}
       #pragma omp parallel for schedule(runtime)
 {%- endif %}
@@ -343,10 +336,9 @@ cudaProfilerStop();
             {{ access.name }} = {{ access.expr }};
           {%- endif -%}
         {%- endfor %}
-          {{ region.body }}
+          {{ stage.body }}
         }
       }
-    {%- endfor %}
 {%- if loop.last or multi.stages[loop.index].interval|length > 0 %}
     }
 {%- endif %}

@@ -168,7 +168,9 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
 
             sub_stage = stage_data.copy()
             region = sub_stage["regions"][i]
-            entry_conditional = region["entry_conditional"]
+            entry_conditional = (
+                region["entry_conditional"] if "entry_conditional" in region else ""
+            )
             if len(entry_conditional) > 0:
                 entry_conditional = self._format_conditional(entry_conditional)
 
@@ -226,8 +228,10 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
             if name not in node.unreferenced
         ]
 
-        self.splitters_ = tuple(
-            splitter.name for splitter in gt_utils.flatten_iter(node.splitters)
+        self.splitters_ = (
+            tuple(splitter.name for splitter in gt_utils.flatten_iter(node.splitters))
+            if hasattr(node, "splitters")
+            else ()
         )
 
         multi_stages: List[Dict[str, Any]] = list()

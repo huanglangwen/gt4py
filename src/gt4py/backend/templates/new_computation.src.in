@@ -32,10 +32,12 @@
                 }
             ],
             "interval": [{ "level": str, "offset": int }],
+            "entry_conditional": str,
             "body": str,
             "extents": [int]
         }]}]
     - parameters: [{ "name": str, "dtype": str }]
+    - splitters: [str]
     - stencil_unique_name: str
     - tmp_fields: [{ "name": str, "dtype": str, "axes": str }]
     - access_vars: [{ "name": str, "expr": str, "itype": str, "stages": [str] }]
@@ -179,7 +181,13 @@ __global__ void __launch_bounds__({{ max_threads }}) {{ multi.name }}_kernel(
           {{ access.name }} = {{ access.expr }};
           {%- endif -%}
         {%- endfor %}
+        {%- if stage.entry_conditional|length > 0 %}
+        if ({{ stage.entry_conditional }}) {
           {{ stage.body }}
+        }
+        {%- else %}
+          {{ stage.body }}
+        {%- endif %}
         }
       }
     }
@@ -222,9 +230,15 @@ void run(const std::array<uint_t, ndim>& domain,
     const int j_max = domain[1] + j_min - 1;
     const int k_min = min_origin[2];
     const int k_max = domain[2] + k_min - 1;
+{%- for splitter in splitters -%}
+    {{ splitter }} += {{ splitter|replace("start", "min")|replace("end", "min") }};
+{%- endfor -%}
 {%- if debug %}
     printf("DEBUG: origin = (%d,%d,%d)\n", {{ arg_fields[0].name }}_origin[0], {{ arg_fields[0].name }}_origin[1], {{ arg_fields[0].name }}_origin[2]);
     printf("DEBUG: (i_min,i_max,j_min,j_max,k_min,k_max) = (%d,%d,%d,%d,%d,%d)\n", i_min, i_max, j_min, j_max, k_min, k_max);
+{%- if splitters|length > 0 %}
+    printf("DEBUG: (i_start,i_end,j_start,j_start) = (%d,%d,%d,%d)\n", i_start, i_end, j_start, j_end);
+{%- endif %}
 {%- endif %}
 {%- for field in arg_fields %}
     {{ field.dtype }}* {{ field.name }} = {{ field.name }}_ds.ptr;
@@ -336,7 +350,13 @@ cudaProfilerStop();
             {{ access.name }} = {{ access.expr }};
           {%- endif -%}
         {%- endfor %}
+        {%- if stage.entry_conditional|length > 0 %}
+        if ({{ stage.entry_conditional }}) {
           {{ stage.body }}
+        }
+        {%- else %}
+          {{ stage.body }}
+        {%- endif %}
         }
       }
 {%- if loop.last or multi.stages[loop.index].interval|length > 0 %}

@@ -303,6 +303,10 @@ cudaProfilerStart();
     {%- for param in parameters %}
     {{- comma() }}
     {{ param.name }}
+    {%- endfor %}
+    {%- for splitter in splitter %}
+    {{- comma() }}
+    {{ splitter }}
     {%- endfor %});
     {%- set extra_indent=0 %}
     }

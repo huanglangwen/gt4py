@@ -231,7 +231,7 @@ void run(const std::array<uint_t, ndim>& domain,
     const int k_min = min_origin[2];
     const int k_max = domain[2] + k_min - 1;
 {%- for splitter in splitters -%}
-    {{ splitter }} += {{ splitter|replace("start", "min")|replace("end", "min") }};
+    {{ splitter }} += {{ splitter[0] + "_min" }};
 {%- endfor -%}
 {%- if debug %}
     printf("DEBUG: origin = (%d,%d,%d)\n", {{ arg_fields[0].name }}_origin[0], {{ arg_fields[0].name }}_origin[1], {{ arg_fields[0].name }}_origin[2]);

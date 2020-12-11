@@ -137,12 +137,14 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
         stage_data = super().visit_Stage(node)
         stage_data["name"] = node.name
         stage_data["extents"]: List[int] = []
+        stage_data["no_offset_index"]: List[int] =[]
 
         compute_extent = node.compute_extent
         for i in range(compute_extent.ndims):
             stage_data["extents"].extend(
                 [compute_extent.lower_indices[i], compute_extent.upper_indices[i]]
             )
+            stage_data["no_offset_index"].append(compute_extent.lower_indices[i] == 0 and compute_extent.upper_indices[i] == 0)
 
         stages: List[Dict[str, Any]] = list()
         for i in range(len(node.apply_blocks)):
@@ -243,11 +245,16 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
                 for stage in group.stages:
                     stages.extend(self.visit(stage))
 
+            enable_kcaching: bool = True
+            for stage in stages:
+                enable_kcaching = enable_kcaching and (stage["no_offset_index"][0] and stage["no_offset_index"][1])
+
             multi_stages.append(
                 {
                     "name": f"{multi_stage.name}",
                     "exec": str(multi_stage.iteration_order).lower(),
                     "stages": stages,
+                    "enable_kcaching": enable_kcaching
                 }
             )
 

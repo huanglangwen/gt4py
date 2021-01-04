@@ -44,6 +44,8 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
         self.last_interval_: List[Dict[str, int]] = list()
         self.fuse_k_loops_: bool = "cuda" not in self.gt_backend_t
         self.splitters_: Tuple[str] = None
+        self.prefetching_block_: Set[Tuple[str,str]] = set()
+        self.prefetching_stage_: List[Set[Tuple[str,str]]] = list()
 
     def _compute_max_threads(self, block_sizes: tuple, max_extent: gt_definitions.Extent):
         max_threads = 0
@@ -109,6 +111,7 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
             )
 
         self.access_map_[idx_key]["stages"].add(self.curr_stage_)
+        self.prefetching_block_.add((node.name, self.access_map_[idx_key]["name"]))
         return node.name + "[" + self.access_map_[idx_key]["name"] + "]"
 
     def visit_VarRef(self, node: gt_ir.VarRef, *, write_context=False):
@@ -132,8 +135,15 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
 
         return source
 
+    def visit_ApplyBlock(self, node: gt_ir.ApplyBlock):
+        self.prefetching_block_ = set()
+        result = super().visit_ApplyBlock(node)
+        self.prefetching_stage_.append(self.prefetching_block_)
+        return result
+
     def visit_Stage(self, node: gt_ir.Stage):
         self.curr_stage_ = node.name
+        self.prefetching_stage_ = list()
         stage_data = super().visit_Stage(node)
         stage_data["name"] = node.name
         stage_data["extents"]: List[int] = []
@@ -179,6 +189,7 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
             sub_stage["body"] = region["body"]
             sub_stage["entry_conditional"] = entry_conditional
             sub_stage["interval"] = interval if interval != self.last_interval_ else []
+            sub_stage["prefetching_block"] = self.prefetching_stage_[i]
             del sub_stage["regions"]
             stages.append(sub_stage)
 

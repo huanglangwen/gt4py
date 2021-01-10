@@ -29,14 +29,16 @@ from gt4py.utils import text as gt_text
 from gt4py.utils.attrib import attribkwclass as attribclass
 from gt4py.utils.attrib import attribute
 
+OPTIMIZATION_METHODS = {"IJKLoop", "Prefetching", "ReadonlyCaching", "LoopUnrolling", "KCaching", "BlocksizeAdjusting"}
 
-def _no_offset_index(extents: List[int]):
-    ndims = len(extents) // 2
-    no_offset_index: List[bool] = list()
-    for i in range(ndims):
-        # compute_extent.lower_indices[i] == 0 and compute_extent.upper_indices[i] == 0
-        no_offset_index.append(extents[2 * i] == 0 and extents[2 * i + 1] == 0)
-    return no_offset_index
+def _get_optimization_methods():
+    import os
+    opt_methods = {method: True if method in os.environ else False for method in OPTIMIZATION_METHODS }
+    if "BlocksizeAdjusting" in os.environ:
+        opt_methods["BlocksizeAdjusting"] = os.environ["BlocksizeAdjusting"]
+    else:
+        opt_methods["BlocksizeAdjusting"] = ""
+    return opt_methods
 
 
 @attribclass
@@ -194,25 +196,55 @@ class ReorderLoopPass(gt_ir.IRNodeVisitor):
         offsets = markijklooppass(node)
         node.metadata["offsets"] = offsets
         node.metadata["IJKLoop"] = False
-        if offsets == [False, False, True]:
+        if not offsets[0] and not offsets[1]:
             node.metadata["IJKLoop"] = True
+
+
+class UnrollLoopPass(gt_ir.IRNodeVisitor):
+
+    def __init__(self):
+        self.line_count_: int = 0
+
+    def __call__(self, node: gt_ir.Node):
+        self.visit(node)
+
+    def visit_BlockStmt(self, node: gt_ir.BlockStmt):
+        self.line_count_ += len(node.stmts)
+        for stmt in node.stmts:
+            self.visit(stmt)
+
+    def visit_ApplyBlock(self, node: gt_ir.ApplyBlock):
+        self.line_count_ = 0
+        unroll_num = 1
+        if self.line_count_ <= 2:
+            unroll_num = 16
+        elif self.line_count_ <= 4:
+            unroll_num = 8
+        elif self.line_count_ <= 8:
+            unroll_num = 4
+        elif self.line_count_ <= 16:
+            unroll_num = 2
+        else:
+            unroll_num = 1
+        node.metadata["unroll_num"] = unroll_num
 
 
 class PrefetchingLDGPass(gt_ir.IRNodeMapper):
 
-    def __init__(self, fields: Dict[str, gt_ir.FieldDecl]):
+    def __init__(self, fields: Dict[str, gt_ir.FieldDecl], opt_methods : Dict[str, bool]):
         self.prefetching_block_ : Dict[str, gt_ir.FieldRef] = dict()
         self.read_only_fields_ : Set[str] = set()
         self.fields_: Dict[str, gt_ir.FieldDecl] = fields
+        self.opt_methods_: Dict[str, bool] = opt_methods
 
     def __call__(self, node: gt_ir.Stage):
         return self.visit(node)
 
     def visit_FieldRef(self, path: tuple, node_name: str, node: gt_ir.FieldRef):
         assert(isinstance(node, gt_ir.FieldRef))
-        if node.name in self.read_only_fields_:
+        if self.opt_methods_["ReadonlyCaching"] and node.name in self.read_only_fields_:
             return True, LDGFieldRef(fieldref=node)
-        elif self.fields_[node.name].is_api :
+        elif self.opt_methods_["Prefetching"] and self.fields_[node.name].is_api :
             offset = [node.offset.get(name, 0) for name in node.offset]
             if node.name not in self.prefetching_block_ or offset == [0,0,0]:
                 self.prefetching_block_[node.name] = L1Prefetch(fieldref=node)
@@ -239,8 +271,14 @@ class PrefetchingLDGPass(gt_ir.IRNodeMapper):
 
 class OptimizationPass(gt_ir.IRNodeVisitor):
 
-    def __init__(self):
+    def __init__(self, opt_methods: Dict[str, bool]):
         self.fields_: Dict[str, gt_ir.FieldDecl] = dict()
+        self.opt_methods_ : Dict[str, bool] = {method: opt_methods[method]
+                                               if method in opt_methods else False
+                                               for method in OPTIMIZATION_METHODS}
+        if not self.opt_methods_["IJKLoop"]:
+            self.opt_methods_["LoopUnrolling"] = False
+            self.opt_methods_["KCaching"] = False
 
     def apply(self, impl_node: gt_ir.StencilImplementation):
         impl_node = self.visit(impl_node)
@@ -250,16 +288,22 @@ class OptimizationPass(gt_ir.IRNodeVisitor):
         for i in range(len(node.apply_blocks)):
             applyblock = node.apply_blocks[i]
             applyblock.metadata["IJKLoop"] = False
-            reorderlooppass = ReorderLoopPass()
-            reorderlooppass(applyblock)
-            if applyblock.metadata["IJKLoop"] and exec_order in ["forward", "backward"]:
+            applyblock.metadata["unroll_num"] = 1
+            if self.opt_methods_["IJKLoop"]:
+                reorderlooppass = ReorderLoopPass()
+                reorderlooppass(applyblock)
+            if self.opt_methods_["KCaching"] and applyblock.metadata["IJKLoop"] and exec_order in ["forward", "backward"]:
                 markkcachepass = MarkKCachePass(exec_order=exec_order)
                 k_cache_vars_, offset_dict = markkcachepass(applyblock, **kwargs)
                 insertkcachepass = InsertKCachePass(self.fields_, k_cache_vars_, offset_dict, exec_order)
                 new_block = insertkcachepass(applyblock)
                 node.apply_blocks[i] = new_block
-        prefetchingldgpass = PrefetchingLDGPass(self.fields_)
-        prefetchingldgpass(node)
+        if self.opt_methods_["LoopUnrolling"]:
+            unrolllooppass = UnrollLoopPass()
+            unrolllooppass(node)
+        if self.opt_methods_["Prefetching"] or self.opt_methods_["ReadonlyCaching"]:
+            prefetchingldgpass = PrefetchingLDGPass(self.fields_, self.opt_methods_)
+            prefetchingldgpass(node)
         return node
 
 
@@ -467,6 +511,7 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
             sub_stage["local_decls"] = [self._make_cpp_variable(var_decl)
                                         for name, var_decl in apply_block.local_symbols.items()]
             sub_stage["IJKLoop"] = apply_block.metadata["IJKLoop"] if "IJKLoop" in apply_block.metadata else False
+            sub_stage["unroll_num"] = apply_block.metadata["unroll_num"] if "unroll_num" in apply_block.metadata else 1
             sub_stage["init_read_stmt"] = [self.visit(stmt, ignore_check=True)[0] for stmt in
                                            apply_block.init_stmt]
             del sub_stage["regions"]
@@ -496,10 +541,13 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
         storage_ids: List[int] = []
         block_sizes: List[int] = list(self.BLOCK_SIZES)
 
-        markijklooppass = MarkIJKLoopPass()
-        offsets = markijklooppass(node)
-        if not offsets[0] and not offsets[1]:
-            block_sizes[1] = 1
+        optimization_methods = _get_optimization_methods()
+        if len(optimization_methods["BlocksizeAdjusting"].split(",")) == 3:
+            block_sizes = [int(i) for i in optimization_methods["BlocksizeAdjusting"].split(",")]
+            markijklooppass = MarkIJKLoopPass()
+            offsets = markijklooppass(node)
+            if not offsets[0] and not offsets[1]:
+                block_sizes[1] = 1
 
         max_ndim: int = 0
         for name, field_decl in node.fields.items():
@@ -531,7 +579,7 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
             else ()
         )
 
-        optimization_pass = OptimizationPass()
+        optimization_pass = OptimizationPass(optimization_methods)
         optimization_pass.apply(node)
         multi_stages: List[Dict[str, Any]] = list()
         for multi_stage in node.multi_stages:

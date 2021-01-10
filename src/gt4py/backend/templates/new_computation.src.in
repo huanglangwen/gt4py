@@ -255,7 +255,7 @@ for (k = {{ k0 }}; k <= k_{{ stage.interval[1].level }} + {{ stage.interval[1].o
         {%- for read_stmt in stage.init_read_stmt %}
         {{ read_stmt }}
         {%- endfor %}
-#pragma unroll 2
+#pragma unroll {{ stage.unroll_num }}
         {{kloop}}
 {% else -%}
     {{kloop}}

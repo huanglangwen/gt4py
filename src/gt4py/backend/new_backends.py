@@ -216,13 +216,11 @@ class UnrollLoopPass(gt_ir.IRNodeVisitor):
     def visit_ApplyBlock(self, node: gt_ir.ApplyBlock):
         self.line_count_ = 0
         unroll_num = 1
-        if self.line_count_ <= 2:
-            unroll_num = 16
-        elif self.line_count_ <= 4:
+        if self.line_count_ <= 1:
             unroll_num = 8
-        elif self.line_count_ <= 8:
+        elif self.line_count_ <= 2:
             unroll_num = 4
-        elif self.line_count_ <= 16:
+        elif self.line_count_ <= 4:
             unroll_num = 2
         else:
             unroll_num = 1

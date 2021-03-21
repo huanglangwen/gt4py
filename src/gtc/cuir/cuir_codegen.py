@@ -83,6 +83,7 @@ class CUIRCodegen(codegen.TemplatedGenerator):
         NativeFunction.EXP: "math::exp",
         NativeFunction.LOG: "math::log",
         NativeFunction.TRUNC: "math::trunc",
+        NativeFunction.FLOOR: "floor",
     }
 
     def visit_NativeFunction(self, func: NativeFunction, **kwargs: Any) -> str:
@@ -104,6 +105,11 @@ class CUIRCodegen(codegen.TemplatedGenerator):
     }
 
     DataType = as_fmt("{_this_generator.DATA_TYPE_TO_CODE[_this_node]}")
+    def visit_DataType(self, dtype: DataType, **kwargs):
+        if dtype in self.DATA_TYPE_TO_CODE:
+            return self.DATA_TYPE_TO_CODE[dtype]
+        else:
+            raise AssertionError(f"Invalid DataType value: {dtype}")
 
     UNARY_OPERATOR_TO_CODE = {
         UnaryOperator.NOT: "!",
@@ -153,7 +159,7 @@ class CUIRCodegen(codegen.TemplatedGenerator):
     VerticalLoopSection = as_mako(
         """
         <%def name="sid_shift(step)">
-            sid::shift(ptr, sid::get_stride<dim::k>(m_strides), ${step}_c);
+            sid::shift(__sid_ptr, sid::get_stride<dim::k>(m_strides), ${step}_c);
         </%def>
         <%def name="cache_shift(cache_vars)">
             % for dst, src in zip(cache_vars[:-1], cache_vars[1:]):
@@ -223,28 +229,28 @@ class CUIRCodegen(codegen.TemplatedGenerator):
             GT_FUNCTION_DEVICE void operator()(const int i_block,
                                                const int j_block,
                                                Validator validator) const {
-                auto ptr = m_ptr_holder();
-                sid::shift(ptr,
+                auto __sid_ptr = m_ptr_holder();
+                sid::shift(__sid_ptr,
                            sid::get_stride<sid::blocked_dim<dim::i>>(m_strides),
                            blockIdx.x);
-                sid::shift(ptr,
+                sid::shift(__sid_ptr,
                            sid::get_stride<sid::blocked_dim<dim::j>>(m_strides),
                            blockIdx.y);
-                sid::shift(ptr,
+                sid::shift(__sid_ptr,
                            sid::get_stride<dim::i>(m_strides),
                            i_block);
-                sid::shift(ptr,
+                sid::shift(__sid_ptr,
                            sid::get_stride<dim::j>(m_strides),
                            j_block);
                 % if order == cuir.LoopOrder.PARALLEL:
                 const int k_block = blockIdx.z;
-                sid::shift(ptr,
+                sid::shift(__sid_ptr,
                            sid::get_stride<dim::k>(m_strides),
                            k_block);
                 % endif
 
                 % for field in fields:
-                    auto &&${field} = device::at_key<tag::${field}>(ptr);
+                    auto &&${field} = device::at_key<tag::${field}>(__sid_ptr);
                 % endfor
 
                 % for ij_cache in ij_caches:

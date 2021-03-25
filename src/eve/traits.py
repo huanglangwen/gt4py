@@ -36,7 +36,7 @@ class _CollectSymbols(visitors.NodeVisitor):
                 metadata["definition"].type_, SymbolName
             ):
                 symbol_name = getattr(node, name)
-                if symbol_name in self.collected:
+                if (symbol_name in self.collected) and ("LocalScalar" not in type(node).__name__):
                     raise ValueError(f"Multiple definitions of symbol '{symbol_name}'")
                 self.collected[symbol_name] = node
         if not isinstance(node, SymbolTableTrait):

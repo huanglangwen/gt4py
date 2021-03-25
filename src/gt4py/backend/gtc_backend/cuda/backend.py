@@ -83,12 +83,18 @@ class GTCCudaExtGenerator:
         oir = LocalTemporariesToScalars().visit(oir)
         oir = WriteBeforeReadTemporariesToScalars().visit(oir)
         oir = OnTheFlyMerging().visit(oir)
-        oir = IJCacheDetection().visit(oir)
-        oir = KCacheDetection().visit(oir)
-        oir = PruneKCacheFills().visit(oir)
-        oir = PruneKCacheFlushes().visit(oir)
-        oir = FillFlushToLocalKCaches().visit(oir)
+#        oir = IJCacheDetection().visit(oir)
         return oir
+#        oir_bak = deepcopy(oir)
+#        try:
+#            oir = KCacheDetection().visit(oir)
+#            oir = PruneKCacheFills().visit(oir)
+#            oir = PruneKCacheFlushes().visit(oir)
+#            oir = FillFlushToLocalKCaches().visit(oir)
+#        except NotImplementedError:
+#            return oir_bak
+#        finally:
+#            return oir
 
 
 class GTCCudaBindingsCodegen(codegen.TemplatedGenerator):

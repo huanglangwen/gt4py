@@ -92,9 +92,9 @@ class GTCGTExtGenerator:
         oir = OnTheFlyMerging().visit(oir)
         oir = NoFieldAccessPruning().visit(oir)
         oir = IJCacheDetection().visit(oir)
-        oir = KCacheDetection().visit(oir)
-        oir = PruneKCacheFills().visit(oir)
-        oir = PruneKCacheFlushes().visit(oir)
+#        oir = KCacheDetection().visit(oir)
+#        oir = PruneKCacheFills().visit(oir)
+#        oir = PruneKCacheFlushes().visit(oir)
         return oir
 
 

@@ -18,9 +18,11 @@ from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Type
 
 from eve import codegen
 from eve.codegen import MakoTemplate as as_mako
+from gt4py import definitions as gt_definitions
+from gt4py import utils as gt_utils
 from gt4py import backend as gt_backend
 from gt4py import gt_src_manager
-from gt4py.backend import BaseGTBackend, CLIBackendMixin
+from gt4py.backend import BaseGTBackend, CLIBackendMixin, PyExtModuleGenerator, BaseModuleGenerator
 from gt4py.backend.gt_backends import (
     GTCUDAPyModuleGenerator,
     cuda_is_compatible_layout,
@@ -158,7 +160,8 @@ class GTCCudaBindingsCodegen(codegen.TemplatedGenerator):
         PYBIND11_MODULE(${module_name}, m) {
             m.def("run_computation", [](std::array<gt::uint_t, 3> domain,
             ${','.join(entry_params)},
-            py::object exec_info){
+            py::object exec_info,
+            int64_t stream){
                 if (!exec_info.is(py::none()))
                 {
                     auto exec_info_dict = exec_info.cast<py::dict>();
@@ -167,7 +170,7 @@ class GTCCudaBindingsCodegen(codegen.TemplatedGenerator):
                             std::chrono::high_resolution_clock::now().time_since_epoch()).count())/1e9;
                 }
 
-                ${name}(domain)(${','.join(sid_params)});
+                ${name}(domain)(${','.join(sid_params)}, (cudaStream_t) stream);
 
                 if (!exec_info.is(py::none()))
                 {
@@ -188,6 +191,63 @@ class GTCCudaBindingsCodegen(codegen.TemplatedGenerator):
         formatted_code = codegen.format_source("cpp", generated_code, style="LLVM")
         return formatted_code
 
+class GTCCudaPyModuleGenerator(PyExtModuleGenerator):
+    def generate_pre_run(self) -> str:
+        field_names = [
+            key
+            for key in self.args_data["field_info"]
+            if self.args_data["field_info"][key] is not None
+        ]
+
+        return "\n".join([f + ".host_to_device()" for f in field_names])
+
+    def generate_imports(self) -> str:
+        source = (
+                """
+import cupy
+    """
+                + super().generate_imports()
+        )
+        return source
+
+    def generate_post_run(self) -> str:
+        output_field_names = [
+            name
+            for name, info in self.args_data["field_info"].items()
+            if info is not None and info.access == gt_definitions.AccessKind.READ_WRITE
+        ]
+
+        return "\n".join([f + "._set_device_modified()" for f in output_field_names])
+
+    def generate_implementation(self) -> str:
+        definition_ir = self.builder.definition_ir
+        sources = gt_utils.text.TextBlock(indent_size=BaseModuleGenerator.TEMPLATE_INDENT_SIZE)
+
+        args = []
+        api_fields = set(field.name for field in definition_ir.api_fields)
+        for arg in definition_ir.api_signature:
+            if arg.name not in self.args_data["unreferenced"]:
+                args.append(arg.name)
+                if arg.name in api_fields:
+                    args.append("list(_origin_['{}'])".format(arg.name))
+
+        # only generate implementation if any multi_stages are present. e.g. if no statement in the
+        # stencil has any effect on the API fields, this may not be the case since they could be
+        # pruned.
+        if self.builder.implementation_ir.has_effect:
+            source = """
+# Load or generate a GTComputation object for the current domain size
+pyext_module.run_computation(list(_domain_), {run_args}, exec_info, 0)
+""".format(
+                run_args=", ".join(args)
+            )
+            sources.extend(source.splitlines())
+        else:
+            sources.extend("\n")
+
+        return sources.text+"""
+if not async_launch: cupy.cuda.Device(0).synchronize()
+        """
 
 @gt_backend.register
 class GTCCudaBackend(BaseGTBackend, CLIBackendMixin):
@@ -204,7 +264,7 @@ class GTCCudaBackend(BaseGTBackend, CLIBackendMixin):
         "is_compatible_type": cuda_is_compatible_type,
     }
     PYEXT_GENERATOR_CLASS = GTCCudaExtGenerator  # type: ignore
-    MODULE_GENERATOR_CLASS = GTCUDAPyModuleGenerator
+    MODULE_GENERATOR_CLASS = GTCCudaPyModuleGenerator
     GT_BACKEND_T = "gpu"
 
     def generate_extension(self, **kwargs: Any) -> Tuple[str, str]:

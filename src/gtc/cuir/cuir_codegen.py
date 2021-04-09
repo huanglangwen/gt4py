@@ -369,6 +369,36 @@ class CUIRCodegen(codegen.TemplatedGenerator):
         #include <gridtools/stencil/gpu/launch_kernel.hpp>
         #include <gridtools/stencil/gpu/shared_allocator.hpp>
         #include <gridtools/stencil/gpu/tmp_storage_sid.hpp>
+        
+        using gridtools::int_t;
+        using gridtools::uint_t;
+        using gridtools::stencil::gpu_backend::launch_kernel_impl_::is_empty_ij_extents;
+        using gridtools::stencil::gpu_backend::launch_kernel_impl_::zero_extent_wrapper;
+        template <class Extent,
+            int_t BlockSizeI,
+            int_t BlockSizeJ,
+            class Fun,
+            std::enable_if_t<is_empty_ij_extents<Extent>(), int> = 0>
+        void launch_kernel(int_t i_size, int_t j_size, uint_t zblocks, Fun fun, size_t shared_memory_size = 0, cudaStream_t stream = 0) {
+
+            static_assert(std::is_trivially_copyable<Fun>::value, GT_INTERNAL_ERROR);
+
+            static const size_t num_threads = BlockSizeI * BlockSizeJ;
+
+            uint_t xblocks = (i_size + BlockSizeI - 1) / BlockSizeI;
+            uint_t yblocks = (j_size + BlockSizeJ - 1) / BlockSizeJ;
+
+            dim3 blocks = {xblocks, yblocks, zblocks};
+            dim3 threads = {BlockSizeI, BlockSizeJ, 1};
+#ifndef __HIPCC__
+            GT_CUDA_CHECK(cudaFuncSetAttribute(zero_extent_wrapper<num_threads, BlockSizeI, BlockSizeJ, Fun>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared_memory_size));
+#endif
+            zero_extent_wrapper<num_threads, BlockSizeI, BlockSizeJ, Fun><<<blocks, threads, shared_memory_size, stream>>>(std::move(fun), i_size, j_size);
+            GT_CUDA_CHECK(cudaGetLastError());
+#ifndef NDEBUG
+            GT_CUDA_CHECK(cudaDeviceSynchronize());
+#endif
+        }
 
         namespace ${name}_impl_{
             using namespace gridtools;
@@ -402,7 +432,7 @@ class CUIRCodegen(codegen.TemplatedGenerator):
             % endfor
 
             auto ${name}(domain_t domain){
-                return [domain](${','.join(f'auto&& {p}' for p in params)}){
+                return [domain](${','.join(f'auto&& {p}' for p in params)}, cudaStream_t stream){
                     auto tmp_alloc = sid::device::make_cached_allocator(&cuda_util::cuda_malloc<char[]>);
                     const int i_size = domain[0];
                     const int j_size = domain[1];
@@ -467,7 +497,7 @@ class CUIRCodegen(codegen.TemplatedGenerator):
                         kernel_${kernel.id_}_f<${', '.join(f'decltype(loop_{vl.id_})' for vl in kernel.vertical_loops)}> kernel_${kernel.id_}{
                             ${', '.join(f'loop_{vl.id_}' for vl in kernel.vertical_loops)}
                         };
-                        gpu_backend::launch_kernel<${max_extent},
+                        launch_kernel<${max_extent},
                             i_block_size_t::value, j_block_size_t::value>(
                             i_size,
                             j_size,
@@ -477,10 +507,11 @@ class CUIRCodegen(codegen.TemplatedGenerator):
                                 1,
                             %endif
                             kernel_${kernel.id_},
-                            shared_alloc_${kernel.id_}.size());
+                            shared_alloc_${kernel.id_}.size(),
+                            stream);
                     % endfor
 
-                    GT_CUDA_CHECK(cudaDeviceSynchronize());
+                    // GT_CUDA_CHECK(cudaDeviceSynchronize());
                 };
             }
         }

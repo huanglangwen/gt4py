@@ -161,7 +161,7 @@ class GTCCudaBindingsCodegen(codegen.TemplatedGenerator):
             m.def("run_computation", [](std::array<gt::uint_t, 3> domain,
             ${','.join(entry_params)},
             py::object exec_info,
-            int64_t stream){
+            std::array<int64_t, NUM_KERNELS> streams){
                 if (!exec_info.is(py::none()))
                 {
                     auto exec_info_dict = exec_info.cast<py::dict>();
@@ -170,7 +170,7 @@ class GTCCudaBindingsCodegen(codegen.TemplatedGenerator):
                             std::chrono::high_resolution_clock::now().time_since_epoch()).count())/1e9;
                 }
 
-                ${name}(domain)(${','.join(sid_params)}, (cudaStream_t) stream);
+                ${name}(domain)(${','.join(sid_params)}, streams);
 
                 if (!exec_info.is(py::none()))
                 {
@@ -180,7 +180,12 @@ class GTCCudaBindingsCodegen(codegen.TemplatedGenerator):
                             std::chrono::high_resolution_clock::now().time_since_epoch()).count()/1e9);
                 }
 
-            }, "Runs the given computation");}
+            }, "Runs the given computation");
+        
+        m.def("num_kernels", []() {
+                return NUM_KERNELS;
+            }, "Get number of CUDA kernels");
+        }
         %endif
         """
     )
@@ -192,6 +197,30 @@ class GTCCudaBindingsCodegen(codegen.TemplatedGenerator):
         return formatted_code
 
 class GTCCudaPyModuleGenerator(PyExtModuleGenerator):
+
+    def generate_imports(self) -> str:
+        source = """
+import cupy
+from gt4py import utils as gt_utils
+            """
+        return source
+
+    def generate_class_members(self) -> str:
+        source = ""
+        if self.builder.implementation_ir.multi_stages:
+            source += """
+_pyext_module = gt_utils.make_module_from_file(
+    "{pyext_module_name}", "{pyext_file_path}", public_import=True
+    )
+    
+@property
+def pyext_module(self):
+    return type(self)._pyext_module
+                """.format(
+                pyext_module_name=self.pyext_module_name, pyext_file_path=self.pyext_file_path
+            )
+        return source
+
     def generate_pre_run(self) -> str:
         field_names = [
             key
@@ -200,15 +229,6 @@ class GTCCudaPyModuleGenerator(PyExtModuleGenerator):
         ]
 
         return "\n".join([f + ".host_to_device()" for f in field_names])
-
-    def generate_imports(self) -> str:
-        source = (
-                """
-import cupy
-    """
-                + super().generate_imports()
-        )
-        return source
 
     def generate_post_run(self) -> str:
         output_field_names = [
@@ -237,7 +257,10 @@ import cupy
         if self.builder.implementation_ir.has_effect:
             source = """
 # Load or generate a GTComputation object for the current domain size
-pyext_module.run_computation(list(_domain_), {run_args}, exec_info, 0)
+num_kernels = self.pyext_module.num_kernels()
+if isinstance(streams, int):
+    streams = [streams]*num_kernels
+self.pyext_module.run_computation(list(_domain_), {run_args}, exec_info, list(streams))
 """.format(
                 run_args=", ".join(args)
             )

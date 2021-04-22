@@ -370,6 +370,8 @@ class CUIRCodegen(codegen.TemplatedGenerator):
         #include <gridtools/stencil/gpu/shared_allocator.hpp>
         #include <gridtools/stencil/gpu/tmp_storage_sid.hpp>
         
+        constexpr int NUM_KERNELS = ${len(_this_node.kernels)};
+        
         using gridtools::int_t;
         using gridtools::uint_t;
         using gridtools::stencil::gpu_backend::launch_kernel_impl_::is_empty_ij_extents;
@@ -432,7 +434,7 @@ class CUIRCodegen(codegen.TemplatedGenerator):
             % endfor
 
             auto ${name}(domain_t domain){
-                return [domain](${','.join(f'auto&& {p}' for p in params)}, cudaStream_t stream){
+                return [domain](${','.join(f'auto&& {p}' for p in params)}, std::array<int64_t, NUM_KERNELS> streams){
                     auto tmp_alloc = sid::device::make_cached_allocator(&cuda_util::cuda_malloc<char[]>);
                     const int i_size = domain[0];
                     const int j_size = domain[1];
@@ -508,7 +510,7 @@ class CUIRCodegen(codegen.TemplatedGenerator):
                             %endif
                             kernel_${kernel.id_},
                             shared_alloc_${kernel.id_}.size(),
-                            stream);
+                            (cudaStream_t) streams[${loop.index}]);
                     % endfor
 
                     // GT_CUDA_CHECK(cudaDeviceSynchronize());

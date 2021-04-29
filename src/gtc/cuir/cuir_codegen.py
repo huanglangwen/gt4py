@@ -371,6 +371,7 @@ class CUIRCodegen(codegen.TemplatedGenerator):
         #include <gridtools/stencil/gpu/tmp_storage_sid.hpp>
         
         constexpr int NUM_KERNELS = ${len(_this_node.kernels)};
+        constexpr std::array<int, NUM_KERNELS> DEPENDENCY = {${','.join(str(i) for i in _this_node.dependency)}};
         
         using gridtools::int_t;
         using gridtools::uint_t;

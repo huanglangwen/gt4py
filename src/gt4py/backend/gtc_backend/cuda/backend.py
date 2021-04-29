@@ -32,7 +32,7 @@ from gt4py.backend.gt_backends import (
 from gt4py.backend.gtc_backend.defir_to_gtir import DefIRToGTIR
 from gtc import gtir_to_oir
 from gtc.common import DataType
-from gtc.cuir import cuir, cuir_codegen, extent_analysis, kernel_fusion, oir_to_cuir
+from gtc.cuir import cuir, cuir_codegen, extent_analysis, kernel_fusion, oir_to_cuir, dependency_analysis
 from gtc.passes.gtir_dtype_resolver import resolve_dtype
 from gtc.passes.gtir_prune_unused_parameters import prune_unused_parameters
 from gtc.passes.gtir_upcaster import upcast
@@ -72,6 +72,7 @@ class GTCCudaExtGenerator:
         cuir = kernel_fusion.FuseKernels().visit(cuir)
         cuir = extent_analysis.ComputeExtents().visit(cuir)
         cuir = extent_analysis.CacheExtents().visit(cuir)
+        cuir = dependency_analysis.DependencyAnalysis().visit(cuir)
         implementation = cuir_codegen.CUIRCodegen.apply(cuir)
         bindings = GTCCudaBindingsCodegen.apply(cuir, module_name=self.module_name)
         return {
@@ -185,7 +186,13 @@ class GTCCudaBindingsCodegen(codegen.TemplatedGenerator):
         m.def("num_kernels", []() {
                 return NUM_KERNELS;
             }, "Get number of CUDA kernels");
+            
+        m.def("dependency", []() {
+                return DEPENDENCY;
+            }, "Get dependency array");
         }
+        
+        
         %endif
         """
     )

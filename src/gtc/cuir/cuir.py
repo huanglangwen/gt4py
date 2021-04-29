@@ -211,3 +211,4 @@ class Program(LocNode, SymbolTableTrait):
     params: List[Decl]
     temporaries: List[Temporary]
     kernels: List[Kernel]
+    dependency: List[int]  # kernel i is dependent on dependency[i], -1 means no dependency, 0 indexed

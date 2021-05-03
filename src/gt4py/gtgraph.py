@@ -25,15 +25,20 @@ import networkx as nx
 import types
 import astor
 from typing import Any, Callable, Dict, Tuple
+from gt4py.stencil_object import StencilObject
 
 
 _graphs: Dict[str, Tuple[Any, Dict[str, Any]]] = {}
 
+def get_stencil_in_context():
+    ctx = globals()
+    return {k: ctx[k] for k in ctx if isinstance(ctx[k], StencilObject)}
 
-def gtgraph(definition=None, **stencil_kwargs) -> Tuple[Any, Dict[str, Any]]:
+def gtgraph(definition=None, **stencil_kwargs):
     def decorator(definition) -> Callable[..., None]:
         def_name = f"{definition.__module__}.{definition.__name__}"
-        graph, meta_data = GraphMaker.apply(definition)
+        stencil_ctx = get_stencil_in_context()
+        graph, meta_data = GraphMaker.apply(definition, stencil_ctx)
         _graphs[def_name] = (graph, meta_data)
 
         return _graphs[def_name]
@@ -43,14 +48,37 @@ def gtgraph(definition=None, **stencil_kwargs) -> Tuple[Any, Dict[str, Any]]:
     else:
         return decorator(definition)
 
+class InsertAsync(ast.NodeTransformer):
+    @classmethod
+    def apply(cls, definition, ctx):
+        maker = cls(definition, ctx)
+        return astor.to_source(maker.visit(maker.ast_root))
+
+    def __init__(self, definition, ctx):
+        self.ast_root = astor.code_to_ast(definition)
+        self.stencil_ctx = {k: ctx[k] for k in ctx if isinstance(ctx[k], StencilObject)}
+
+    def visit_Call(self, node: ast.Call):
+        if isinstance(node.func, ast.Name):
+            func_name = node.func.id
+            keywords = [i.arg for i in node.keywords]
+            if (func_name in self.stencil_ctx) and ('async_launch' not in keywords):
+                return ast.copy_location(ast.Call(func=node.func,
+                                                  args=node.args,
+                                                  keywords=node.keywords+[ast.keyword(arg='async_launch',
+                                                                                      value=ast.Constant(value=True, kind=None))]), node)
+        return node
+
+
+
 class GraphMaker(ast.NodeVisitor):
     @classmethod
-    def apply(cls, definition):
-        maker = cls(definition)
+    def apply(cls, definition, stencil_ctx: Dict[str, StencilObject]):
+        maker = cls(definition, stencil_ctx)
         maker(maker.ast_root)
         return maker.graph, maker.meta_data
 
-    def __init__(self, definition):
+    def __init__(self, definition, stencil_ctx: Dict[str, StencilObject]):
         assert isinstance(definition, types.FunctionType)
         self.definition = definition
         self.filename = inspect.getfile(definition)
@@ -58,6 +86,7 @@ class GraphMaker(ast.NodeVisitor):
         self.ast_root = ast.parse(self.source)
         self.graph = nx.DiGraph()
         self.meta_data: Dict[str, Any] = {}
+        self.stencil_ctx: Dict[str, StencilObject] = stencil_ctx
 
     def __call__(self, func_node: ast.FunctionDef):
         self.visit(func_node)

@@ -21,12 +21,17 @@ graphs from functions that call gtscript stencils.
 
 import ast
 import inspect
+
+import cupy.cuda
 import networkx as nx
 import types
 import astor
-from typing import Any, Callable, Dict, Tuple
+from typing import Any, Callable, Dict, Tuple, List, Deque
 from gt4py.stencil_object import StencilObject
-
+from gt4py import AccessKind
+from collections import deque
+from dataclasses import dataclass
+from time import sleep
 
 _graphs: Dict[str, Tuple[Any, Dict[str, Any]]] = {}
 
@@ -48,11 +53,107 @@ def gtgraph(definition=None, **stencil_kwargs):
     else:
         return decorator(definition)
 
+@dataclass
+class InvokedStencil():
+    import cupy
+    stencil: StencilObject
+    done_event: cupy.cuda.Event
+
+class AsyncContext():
+    import cupy
+    def __init__(self, num_streams, max_invoked_stencils = 50):
+        self.stream_pool: List[cupy.cuda.Stream] = []
+        self.add_streams(num_streams)
+        self.invoked_stencils: Deque[InvokedStencil] = deque()
+        self.max_invoked_stencils: int = max_invoked_stencils
+
+    def add_streams(self, num_streams):
+        self.stream_pool.extend(self.cupy.cuda.Stream(non_blocking=True) for _ in range(num_streams))
+
+    def allocate_streams(self, num_streams):
+        streams = []
+        n = 0
+        for stream in self.stream_pool:
+            if n < num_streams:
+                if stream.done:
+                    streams.append(stream)
+                    n += 1
+            else:
+                break
+        if n < num_streams:
+            self.add_streams(num_streams - n)
+            streams.extend(self.stream_pool[n - num_streams:])
+        return streams
+
+    def free_streams(self):
+        del self.stream_pool
+
+    def free_finished_stencils(self):
+        #https://stackoverflow.com/questions/8037455/how-to-modify-python-collections-by-filtering-in-place
+        for _ in range(len(self.invoked_stencils)):
+            stencil = self.invoked_stencils.popleft()
+            if not stencil.done_event.done:
+                self.invoked_stencils.append(stencil)
+
+    def _get_field_access_info(self, stencil: StencilObject):
+        reads = set(v for v in stencil.field_info if stencil.field_info[v].access == AccessKind.READ_ONLY)
+        writes = set(v for v in stencil.field_info if stencil.field_info[v].access == AccessKind.READ_WRITE)
+        return reads, writes
+
+    def get_dependencies(self, stencil: StencilObject) -> List[cupy.cuda.Event]:
+        # R -> W, W -> W, W -> R
+        dep_events = []
+        reads, writes = self._get_field_access_info(stencil)
+        for stencil_i in self.invoked_stencils:
+            if not stencil_i.done_event.done:
+                reads_i, writes_i = self._get_field_access_info(stencil_i.stencil)
+                if writes.intersection(reads_i): # R -> W
+                    dep_events.append(stencil_i.done_event)
+                    continue
+                if writes.intersection(writes_i): # W -> W
+                    dep_events.append(stencil_i.done_event)
+                    continue
+                if reads.intersection(writes_i): # W -> R
+                    dep_events.append(stencil_i.done_event)
+                    continue
+        return dep_events
+
+    def add_invoked_stencil(self, stencil: StencilObject, done_event: cupy.cuda.Event):
+        while len(self.invoked_stencils) >= self.max_invoked_stencils:
+            sleep(0.5) # wait 0.5s for gpu computation
+            self.free_finished_stencils()
+        self.invoked_stencils.append(InvokedStencil(stencil=stencil, done_event=done_event))
+
+    def wait_finish(self):
+        while len(self.invoked_stencils) > 0:
+            sleep(0.5)
+            self.free_finished_stencils()
+        self.free_streams()
+
+def async_invoke(async_context: AsyncContext, stencil: StencilObject, *args, **kwargs):
+    """
+    Step 1: remove finished calls & free streams
+    Step 2: analyse dependency
+    Step 3: allocate streams
+    Step 4: insert start & wait events in streams
+    Step 5: invoke stencil
+    Step 6: insert stop & wait events
+    """
+    async_context.free_finished_stencils()
+    dep_events = async_context.get_dependencies(stencil)
+    # count how many streams needed
+    # insert events
+    stencil(*args, async_launch=True, **kwargs) # also streams=[...]
+    # insert events
+    # update async_ctx
+
 class InsertAsync(ast.NodeTransformer):
     @classmethod
     def apply(cls, definition, ctx):
         maker = cls(definition, ctx)
-        return astor.to_source(maker.visit(maker.ast_root))
+        maker.ast_root = maker.visit(maker.ast_root)
+        maker.ast_root = maker.insert_init(maker.ast_root)
+        return astor.to_source(maker.ast_root, add_line_information=True)
 
     def __init__(self, definition, ctx):
         self.ast_root = astor.code_to_ast(definition)
@@ -63,10 +164,13 @@ class InsertAsync(ast.NodeTransformer):
             func_name = node.func.id
             keywords = [i.arg for i in node.keywords]
             if (func_name in self.stencil_ctx) and ('async_launch' not in keywords):
-                return ast.copy_location(ast.Call(func=node.func,
-                                                  args=node.args,
-                                                  keywords=node.keywords+[ast.keyword(arg='async_launch',
-                                                                                      value=ast.Constant(value=True, kind=None))]), node)
+                return ast.copy_location(ast.Call(func=ast.Name(id="async_invoke", ctx=ast.Load()),
+                                                  args=[ast.Name(id="async_context", ctx=ast.Load()), node.func]+node.args,
+                                                  keywords=node.keywords), node)
+        return node
+
+    def insert_init(self, node: ast.FunctionDef):
+        pass
         return node
 
 

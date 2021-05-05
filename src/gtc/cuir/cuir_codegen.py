@@ -371,10 +371,14 @@ class CUIRCodegen(codegen.TemplatedGenerator):
         #include <gridtools/stencil/gpu/tmp_storage_sid.hpp>
         
         constexpr int NUM_KERNELS = ${len(_this_node.kernels)};
+        <%
+        dependency_row_ind = _this_node.dependency[0]
+        dependency_col_ind = _this_node.dependency[1]
+        %>
         % if _this_node.dependency:
         constexpr bool DEPENDENCY = true;
-        constexpr std::array<int, NUM_KERNELS+1> DEPENDENCY_ROW_IND = {${','.join(str(i) for i in _this_node.dependency[0])}};
-        constexpr std::array<int, ${len(_this_node.dependency[1])}> DEPENDENCY_COL_IND = {${','.join(str(i) for i in _this_node.dependency[1])}};
+        constexpr std::array<int, NUM_KERNELS+1> DEPENDENCY_ROW_IND = {${','.join(str(i) for i in dependency_row_ind)}};
+        constexpr std::array<int, ${len(dependency_col_ind)}> DEPENDENCY_COL_IND = {${','.join(str(i) for i in dependency_col_ind)}};
         % else:
         constexpr bool DEPENDENCY = false;
         constexpr std::array<int, 1> DEPENDENCY_ROW_IND = { -1 };
@@ -391,9 +395,13 @@ class CUIRCodegen(codegen.TemplatedGenerator):
             int_t BlockSizeJ,
             class Fun,
             std::enable_if_t<is_empty_ij_extents<Extent>(), int> = 0>
-        void launch_kernel(int_t i_size, int_t j_size, uint_t zblocks, Fun fun, size_t shared_memory_size = 0, cudaStream_t stream = 0) {
+        void launch_kernel(int_t i_size, int_t j_size, uint_t zblocks, 
+                           Fun fun, size_t shared_memory_size = 0, 
+                           cudaStream_t stream = 0, cudaEvent_t* end_event = nullptr) {
 
             static_assert(std::is_trivially_copyable<Fun>::value, GT_INTERNAL_ERROR);
+            
+            if (end_event) cudaEventCreateWithFlags(end_event, cudaEventDisableTiming);
 
             static const size_t num_threads = BlockSizeI * BlockSizeJ;
 
@@ -406,6 +414,7 @@ class CUIRCodegen(codegen.TemplatedGenerator):
             GT_CUDA_CHECK(cudaFuncSetAttribute(zero_extent_wrapper<num_threads, BlockSizeI, BlockSizeJ, Fun>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared_memory_size));
 #endif
             zero_extent_wrapper<num_threads, BlockSizeI, BlockSizeJ, Fun><<<blocks, threads, shared_memory_size, stream>>>(std::move(fun), i_size, j_size);
+            if (end_event) cudaEventRecord(*end_event, stream);
             GT_CUDA_CHECK(cudaGetLastError());
 #ifndef NDEBUG
             GT_CUDA_CHECK(cudaDeviceSynchronize());
@@ -509,6 +518,14 @@ class CUIRCodegen(codegen.TemplatedGenerator):
                         kernel_${kernel.id_}_f<${', '.join(f'decltype(loop_{vl.id_})' for vl in kernel.vertical_loops)}> kernel_${kernel.id_}{
                             ${', '.join(f'loop_{vl.id_}' for vl in kernel.vertical_loops)}
                         };
+                        <% i_ = loop.index %>
+                        % for j_ in range(i_):
+                            % if j_ in dependency_col_ind[dependency_row_ind[i_]:dependency_row_ind[i_+1]]:
+                        if (streams[${i_}] != streams[${j_}]) 
+                            cudaStreamWaitEvent((cudaStream_t) streams[${i_}], end_event_${j_}, 0); // cudaEventWaitDefault = 0
+                            % endif
+                        % endfor
+                        cudaEvent_t end_event_${i_};
                         launch_kernel<${max_extent},
                             i_block_size_t::value, j_block_size_t::value>(
                             i_size,
@@ -520,7 +537,8 @@ class CUIRCodegen(codegen.TemplatedGenerator):
                             %endif
                             kernel_${kernel.id_},
                             shared_alloc_${kernel.id_}.size(),
-                            (cudaStream_t) streams[${loop.index}]);
+                            (cudaStream_t) streams[${i_}],
+                            &end_event_${i_});
                     % endfor
 
                     // GT_CUDA_CHECK(cudaDeviceSynchronize());

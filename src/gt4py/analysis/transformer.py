@@ -34,6 +34,7 @@ from .passes import (
     MergeBlocksPass,
     NormalizeBlocksPass,
     RemoveUnreachedStatementsPass,
+    ReduceTemporaryStoragesPass,
 )
 
 

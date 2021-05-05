@@ -29,6 +29,7 @@ import astor
 from typing import Any, Callable, Dict, Tuple, List, Deque
 from gt4py.stencil_object import StencilObject
 from gt4py import AccessKind
+from gt4py.storage import Storage
 from collections import deque
 from dataclasses import dataclass
 from time import sleep
@@ -56,14 +57,18 @@ def gtgraph(definition=None, **stencil_kwargs):
 @dataclass
 class InvokedStencil():
     stencil: StencilObject
+    access_info: Dict[str, AccessKind]
     done_event: cupy.cuda.Event
 
 class AsyncContext():
-    def __init__(self, num_streams, max_invoked_stencils = 50):
+    def __init__(self, num_streams, max_invoked_stencils = 50, blocking = False, sleep_time = 0.5):
         self.stream_pool: List[cupy.cuda.Stream] = []
         self.add_streams(num_streams)
         self.invoked_stencils: Deque[InvokedStencil] = deque()
         self.max_invoked_stencils: int = max_invoked_stencils
+        self.known_num_fields: int = 0
+        self.blocking: bool = blocking # synchronize all stencils, debug only
+        self.sleep_time: float = 0.5 # (second) longer sleep saves cpu cycle but lower resolution in timing
 
     def add_streams(self, num_streams):
         self.stream_pool.extend(cupy.cuda.Stream(non_blocking=True) for _ in range(num_streams))
@@ -83,9 +88,6 @@ class AsyncContext():
             streams.extend(self.stream_pool[n - num_streams:])
         return streams
 
-    def free_streams(self):
-        del self.stream_pool
-
     def free_finished_stencils(self):
         #https://stackoverflow.com/questions/8037455/how-to-modify-python-collections-by-filtering-in-place
         for _ in range(len(self.invoked_stencils)):
@@ -93,18 +95,36 @@ class AsyncContext():
             if not stencil.done_event.done:
                 self.invoked_stencils.append(stencil)
 
-    def _get_field_access_info(self, stencil: StencilObject):
-        reads = set(v for v in stencil.field_info if stencil.field_info[v].access == AccessKind.READ_ONLY)
-        writes = set(v for v in stencil.field_info if stencil.field_info[v].access == AccessKind.READ_WRITE)
-        return reads, writes
+    def set_field_name(self, field: Storage, field_name: str):
+        field._field_name = field_name
 
-    def get_dependencies(self, stencil: StencilObject) -> List[cupy.cuda.Event]:
+    def get_field_name(self, field: Storage):
+        if not hasattr(field, '_field_name'):
+            name = f"field_{self.known_num_fields}"
+            self.known_num_fields += 1
+            field._field_name = name
+        return field._field_name
+
+    def get_field_access_info(self, stencil: StencilObject, *args, **kwargs) -> Dict[str, AccessKind]:
+        access_info = {}
+        stencil_sig_bind = inspect.signature(stencil).bind(*args, **kwargs)
+        for k, v in stencil_sig_bind.arguments.items():
+            if isinstance(v, Storage):
+                field_name = self.get_field_name(v)
+                access_kind = stencil.field_info[k].access
+                access_info[field_name] = access_kind
+        return access_info
+
+    def get_dependencies(self, access_info: Dict[str, AccessKind]) -> List[cupy.cuda.Event]:
         # R -> W, W -> W, W -> R
         dep_events = []
-        reads, writes = self._get_field_access_info(stencil)
+        reads = {k for k in access_info if access_info[k] == AccessKind.READ_ONLY}
+        writes = {k for k in access_info if access_info[k] == AccessKind.READ_WRITE}
         for stencil_i in self.invoked_stencils:
             if not stencil_i.done_event.done:
-                reads_i, writes_i = self._get_field_access_info(stencil_i.stencil)
+                access_info_i = stencil_i.access_info
+                reads_i = {k for k in access_info_i if access_info_i[k] == AccessKind.READ_ONLY}
+                writes_i = {k for k in access_info_i if access_info_i[k] == AccessKind.READ_WRITE}
                 if writes.intersection(reads_i): # R -> W
                     dep_events.append(stencil_i.done_event)
                     continue
@@ -116,57 +136,64 @@ class AsyncContext():
                     continue
         return dep_events
 
-    def add_invoked_stencil(self, stencil: StencilObject, done_event: cupy.cuda.Event):
+    def add_invoked_stencil(self, stencil: StencilObject, access_info: Dict[str, AccessKind], done_event: cupy.cuda.Event):
         while len(self.invoked_stencils) >= self.max_invoked_stencils:
-            sleep(0.5) # wait 0.5s for gpu computation
+            sleep(self.sleep_time) # wait for gpu computation
             self.free_finished_stencils()
-        self.invoked_stencils.append(InvokedStencil(stencil=stencil, done_event=done_event))
+        self.invoked_stencils.append(InvokedStencil(stencil=stencil, access_info=access_info, done_event=done_event))
 
     def wait_finish(self):
         while len(self.invoked_stencils) > 0:
-            sleep(0.5)
+            sleep(self.sleep_time)
             self.free_finished_stencils()
-        self.free_streams()
 
-def async_invoke(async_context: AsyncContext, stencil: StencilObject, *args, **kwargs):
-    """
-    Step 1: remove finished calls & free streams
-    Step 2: analyse dependency
-    Step 3: allocate streams
-    Step 4: insert start & wait events in streams
-    Step 5: invoke stencil
-    Step 6: insert stop & wait events
-    """
-    async_context.free_finished_stencils()
-    dep_events = async_context.get_dependencies(stencil)
-    has_dependency_info = False
-    if (hasattr(stencil, 'pyext_module')):
-        num_kernels = stencil.pyext_module.num_kernels()
-        has_dependency_info = stencil.pyext_module.has_dependency_info()
-    else:
-        raise TypeError(f"The stencil object {stencil.__module__}.{stencil.__name__} is not generated by GTC:CUDA backend")
-    # count how many streams needed
-    num_streams = num_kernels if has_dependency_info else 1  # TODO: reduce unnecessary streams
-    stream_pool = async_context.allocate_streams(num_streams)
-    # insert events
-    for stream in stream_pool:
-        for dep_event in dep_events:
-            stream.wait_event(dep_event)
-    # Launch stencil
-    if num_streams == 1:
-        streams = stream_pool * num_kernels
-    else:
-        streams = stream_pool
-    stream_ptrs = [stream.ptr for stream in streams]
-    stencil(*args, async_launch=True, streams=stream_ptrs, **kwargs)
-    # insert events
-    done_events = [cupy.cuda.Event(block=False, disable_timing=True) for _ in range(num_streams)]
-    for i in range(1, num_streams):
-        done_events[i].record(stream_pool[i])
-        stream_pool[0].wait_event(done_events[i])
-    done_events[0].record(stream_pool[0])
-    # update async_ctx
-    async_context.add_invoked_stencil(stencil, done_events[0])
+    def schedule(self, stencil: StencilObject, *args, **kwargs):
+        if self.blocking:
+            stencil(*args, **kwargs)
+        else:
+            self.async_schedule(stencil, *args, **kwargs)
+
+    def async_schedule(self, stencil: StencilObject, *args, **kwargs):
+        """
+        Step 0: remove finished calls & free streams
+        Step 1: mark fields if first meet
+        Step 2: analyse dependency
+        Step 3: allocate streams
+        Step 4: insert start & wait events in streams
+        Step 5: invoke stencil
+        Step 6: insert stop & wait events
+        """
+        self.free_finished_stencils()
+        access_info = self.get_field_access_info(stencil, *args, **kwargs)
+        dep_events = self.get_dependencies(access_info)
+        has_kernel_dependency_info = False
+        if (hasattr(stencil, 'pyext_module')):
+            num_kernels = stencil.pyext_module.num_kernels()
+            has_kernel_dependency_info = stencil.pyext_module.has_dependency_info()
+        else:
+            raise TypeError(f"The stencil object {stencil.__module__}.{stencil.__name__} is not generated by GTC:CUDA backend")
+        # count how many streams needed
+        num_streams = num_kernels if has_kernel_dependency_info else 1  # TODO: reduce unnecessary streams
+        stream_pool = self.allocate_streams(num_streams)
+        # insert events
+        for stream in stream_pool:
+            for dep_event in dep_events:
+                stream.wait_event(dep_event)
+        # Launch stencil
+        if num_streams == 1:
+            streams = stream_pool * num_kernels
+        else:
+            streams = stream_pool
+        stream_ptrs = [stream.ptr for stream in streams]
+        stencil(*args, async_launch=True, streams=stream_ptrs, **kwargs)
+        # insert events
+        done_events = [cupy.cuda.Event(block=False, disable_timing=True) for _ in range(num_streams)]
+        for i in range(1, num_streams):
+            done_events[i].record(stream_pool[i])
+            stream_pool[0].wait_event(done_events[i])
+        done_events[0].record(stream_pool[0])
+        # update async_ctx
+        self.add_invoked_stencil(stencil, access_info, done_events[0])
 
 class InsertAsync(ast.NodeTransformer):
     @classmethod
@@ -190,15 +217,15 @@ class InsertAsync(ast.NodeTransformer):
             func_name = node.func.id
             keywords = [i.arg for i in node.keywords]
             if (func_name in self.stencil_ctx) and ('async_launch' not in keywords):
-                return ast.copy_location(ast.Call(func=ast.Name(id="async_invoke", ctx=ast.Load()),
+                return ast.copy_location(ast.Call(func=ast.Attribute(value=ast.Name(id='async_context', ctx=ast.Load()),
+                                                                     attr='schedule', ctx=ast.Load()),
                                                   args=[ast.Name(id="async_context", ctx=ast.Load()), node.func]+node.args,
                                                   keywords=node.keywords), node)
         return node
 
     def insert_init(self, node: ast.FunctionDef):
         # num_streams_guess = min(20, sum(eval(stencil).pyext_module.num_kernels() for stencil in self.stencil_ctx))
-        import_node = ast.ImportFrom(module='gt4py.gtgraph', names=[ast.alias(name='AsyncContext', asname=None),
-                                                                    ast.alias(name='async_invoke', asname=None)],
+        import_node = ast.ImportFrom(module='gt4py.gtgraph', names=[ast.alias(name='AsyncContext', asname=None)],
                                      level=0, lineno=node.body[0].lineno)
         call_node = ast.Call(func=ast.Name(id="AsyncContext", ctx=ast.Load()),
                              args=[ast.Constant(value=self.num_streams_init, kind=None)],

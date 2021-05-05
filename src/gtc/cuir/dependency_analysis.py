@@ -16,6 +16,8 @@
 
 from eve import NodeTranslator
 from . import cuir
+from typing import List, Tuple
+from itertools import accumulate, chain
 
 class DependencyAnalysis(NodeTranslator):
     """
@@ -23,10 +25,7 @@ class DependencyAnalysis(NodeTranslator):
     """
 
     def visit_Program(self, node: cuir.Program) -> cuir.Program:
-        if len(node.dependency) == len(node.kernels):
-            dependency = node.dependency
-        else:
-            dependency = list(range(-1, len(node.kernels)-1)) # because of kernel fusion
+        dependency_arr: List[List[int]] = [[] for _ in range(len(node.kernels))]
         writes = []
         reads = []
         for i in range(len(node.kernels)):
@@ -45,14 +44,19 @@ class DependencyAnalysis(NodeTranslator):
                 .getattr("name")
                 .to_set() - writes[i]
             )
-            for j in range(i, 0, -1):
+            for j in reversed(range(0, i)):
                 # R -> W, W -> W
                 if writes[i].intersection(writes[j].union(reads[j])):
-                    break
+                    dependency_arr[i].append(j)
+                    continue
                 # W -> R
                 if reads[i].intersection(writes[j]):
-                    break
-                dependency[i] = j - 1
+                    dependency_arr[i].append(j)
+                    continue
+        row_ind = list(accumulate([len(arr) for arr in dependency_arr], initial=0))
+        col_ind = list(chain.from_iterable(dependency_arr))
         return cuir.Program(
-            name=node.name, params=node.params, temporaries=node.temporaries, kernels=node.kernels, dependency=dependency
+            name=node.name, params=node.params,
+            temporaries=node.temporaries,
+            kernels=node.kernels, dependency=(row_ind, col_ind)
         )

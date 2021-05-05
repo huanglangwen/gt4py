@@ -211,4 +211,7 @@ class Program(LocNode, SymbolTableTrait):
     params: List[Decl]
     temporaries: List[Temporary]
     kernels: List[Kernel]
-    dependency: List[int]  # kernel i is dependent on dependency[i], -1 means no dependency, 0 indexed
+    # node i dependent on j: dependency[i, j] != 0, stored in CRS format
+    # tuple(row_ind, col_ind), dependency[i, j] = j in col_ind[i: i + 1]
+    # None means uninitialized, use serial semantics as default
+    dependency: Optional[Tuple[List[int], List[int]]]

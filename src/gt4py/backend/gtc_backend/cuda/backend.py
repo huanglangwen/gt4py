@@ -187,6 +187,10 @@ class GTCCudaBindingsCodegen(codegen.TemplatedGenerator):
                 return NUM_KERNELS;
             }, "Get number of CUDA kernels");
             
+        m.def("has_dependency_info", []() {
+                return DEPENDENCY;
+            }, "whether or not dependency info is present in the module");
+            
         m.def("dependency_row_ind", []() {
                 return DEPENDENCY_ROW_IND;
             }, "Get row ind of dependency matrix stored in csr format");

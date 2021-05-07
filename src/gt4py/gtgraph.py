@@ -96,7 +96,7 @@ class AsyncContext():
 
     def graph_add_stencil(self, stencil: StencilObject, access_info: Dict[str, AccessKind], stencil_id: int):
         args_name = ",".join(k for k in access_info)
-        stencil_name = f"{stencil.options['module']}_{stencil.options['name']}({args_name})"
+        stencil_name = f"{stencil.options['name']}_{stencil_id}({args_name})" # {stencil.options['module']}_
         row_ind, col_ind = self.get_kernel_dependencies(stencil)
         num_kernels = len(row_ind) - 1
         with self._graph.subgraph(name=f'cluster_{stencil_id}') as c:
@@ -116,6 +116,14 @@ class AsyncContext():
                 for j in cols:
                     name_j = self.get_node_name(f'kernel{j}', stencil_id)
                     c.edge(name_j, name_i)
+
+    def graph_add_stencil_dependency(self, stencil_id_i: int, stencil_id_j: int):
+        """
+         i is dependent on j, j -> i
+        """
+        node_name_i = self.get_node_name('start', stencil_id_i)
+        node_name_j = self.get_node_name("end", stencil_id_j)
+        self._graph.edge(node_name_j, node_name_i, style='bold', color='blue')
 
     def graph_stop_record(self):
         self._graph_record = False
@@ -204,9 +212,7 @@ class AsyncContext():
                 if dep_flag:
                     dep_events.append(stencil_i.done_event)
                     if self._graph_record:
-                        node_name_i = self.get_node_name('end', stencil_i.id)
-                        node_name = self.get_node_name("start", stencil_id)
-                        self._graph.edge(node_name_i, node_name, style='bold', color='blue')
+                        self.graph_add_stencil_dependency(stencil_id, stencil_i.id)
         return dep_events
 
     def add_invoked_stencil(self, stencil: StencilObject, access_info: Dict[str, AccessKind], done_event: cupy.cuda.Event, stencil_id: int):

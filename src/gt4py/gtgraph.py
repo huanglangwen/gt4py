@@ -23,38 +23,18 @@ import ast
 import inspect
 
 import cupy.cuda
-import networkx as nx
-import types
 import astor
 from typing import Any, Callable, Dict, Tuple, List, Deque, Optional
 from gt4py.stencil_object import StencilObject
 from gt4py import AccessKind
 from gt4py.storage import Storage
+from gt4py.gtscript import stencil as gtstencil
 from collections import deque
 from dataclasses import dataclass
 from time import sleep
 from graphviz import Digraph
 from uuid import uuid4
-
-_graphs: Dict[str, Tuple[Any, Dict[str, Any]]] = {}
-
-def get_stencil_in_context():
-    ctx = globals()
-    return {k: ctx[k] for k in ctx if isinstance(ctx[k], StencilObject)}
-
-def gtgraph(definition=None, **stencil_kwargs):
-    def decorator(definition) -> Callable[..., None]:
-        def_name = f"{definition.__module__}.{definition.__name__}"
-        stencil_ctx = get_stencil_in_context()
-        graph, meta_data = GraphMaker.apply(definition, stencil_ctx)
-        _graphs[def_name] = (graph, meta_data)
-
-        return _graphs[def_name]
-
-    if definition is None:
-        return decorator
-    else:
-        return decorator(definition)
+import warnings
 
 @dataclass
 class InvokedStencil():
@@ -63,10 +43,16 @@ class InvokedStencil():
     done_event: cupy.cuda.Event
     id: int
 
+@dataclass
+class LastAccessStencil():
+    last_read_stencil_id: Optional[int]
+    last_write_stencil_id: Optional[int]
+
 class AsyncContext():
     def __init__(self, num_streams, max_invoked_stencils = 50, blocking = False, sleep_time = 0.5, graph_record = False, name = None):
         self.stream_pool: List[Optional[cupy.cuda.Stream]] = []
         self.add_streams(num_streams)
+        self.last_accessor: Dict[str, LastAccessStencil] = dict() # Dict[field_name, LastAccessStencil]
         self.invoked_stencils: Deque[InvokedStencil] = deque()
         self.max_invoked_stencils: int = max_invoked_stencils
         self.known_num_fields: int = 0
@@ -111,8 +97,10 @@ class AsyncContext():
                 cols = col_ind[row_ind[i]: row_ind[i+1]]
                 name_i = self.get_node_name(f'kernel{i}', stencil_id)
                 c.node(name_i, label=f"kernel {i}")
-                c.edge(start_name, name_i)
-                c.edge(name_i, end_name)
+                if not cols: # start only direct to those with out dependency
+                    c.edge(start_name, name_i)
+                if i not in col_ind: # only those who does not have decendents points to end
+                    c.edge(name_i, end_name)
                 for j in cols:
                     name_j = self.get_node_name(f'kernel{j}', stencil_id)
                     c.edge(name_j, name_i)
@@ -121,9 +109,10 @@ class AsyncContext():
         """
          i is dependent on j, j -> i
         """
-        node_name_i = self.get_node_name('start', stencil_id_i)
-        node_name_j = self.get_node_name("end", stencil_id_j)
-        self._graph.edge(node_name_j, node_name_i, style='bold', color='blue')
+        if stencil_id_i != stencil_id_j and stencil_id_i is not None and stencil_id_j is not None:
+            node_name_i = self.get_node_name('start', stencil_id_i)
+            node_name_j = self.get_node_name("end", stencil_id_j)
+            self._graph.edge(node_name_j, node_name_i, style='bold', color='blue')
 
     def graph_stop_record(self):
         self._graph_record = False
@@ -171,7 +160,7 @@ class AsyncContext():
             field._field_name = name
         return field._field_name
 
-    def get_field_access_info(self, stencil: StencilObject, *args, **kwargs) -> Dict[str, AccessKind]:
+    def get_field_access_info(self, stencil_id: int, stencil: StencilObject, *args, **kwargs) -> Dict[str, AccessKind]:
         access_info = {}
         stencil_sig_bind = inspect.signature(stencil).bind(*args, **kwargs)
         for k, v in stencil_sig_bind.arguments.items():
@@ -179,6 +168,12 @@ class AsyncContext():
                 field_name = self.get_field_name(v)
                 access_kind = stencil.field_info[k].access
                 access_info[field_name] = access_kind
+                if field_name not in self.last_accessor:
+                    self.last_accessor[field_name] = LastAccessStencil(None, None)
+                if access_kind == AccessKind.READ_ONLY:
+                    self.last_accessor[field_name].last_read_stencil_id = stencil_id
+                if access_kind == AccessKind.READ_WRITE:
+                    self.last_accessor[field_name].last_write_stencil_id = stencil_id
         return access_info
 
     def get_kernel_dependencies(self, stencil: StencilObject) -> Tuple[List[int], List[int]]: #(row_ind, col_ind)
@@ -197,6 +192,7 @@ class AsyncContext():
         dep_events = []
         reads = {k for k in access_info if access_info[k] == AccessKind.READ_ONLY}
         writes = {k for k in access_info if access_info[k] == AccessKind.READ_WRITE}
+        dep_set = set()
         for stencil_i in self.invoked_stencils:
             if not stencil_i.done_event.done:
                 access_info_i = stencil_i.access_info
@@ -211,8 +207,20 @@ class AsyncContext():
                     dep_flag = True
                 if dep_flag:
                     dep_events.append(stencil_i.done_event)
-                    if self._graph_record:
-                        self.graph_add_stencil_dependency(stencil_id, stencil_i.id)
+                    dep_set.add(stencil_i.id)
+        if self._graph_record:
+            # In case some stencils have finished but still have influence on dependency
+            for field in writes:
+                # R -> W
+                dep_set.add(self.last_accessor[field].last_read_stencil_id)
+                # W -> W
+                dep_set.add(self.last_accessor[field].last_write_stencil_id)
+            for field in reads:
+                # W -> R
+                dep_set.add(self.last_accessor[field].last_write_stencil_id)
+            dep_set = dep_set - {stencil_id, None}
+            for j in dep_set:
+                self.graph_add_stencil_dependency(stencil_id, j)
         return dep_events
 
     def add_invoked_stencil(self, stencil: StencilObject, access_info: Dict[str, AccessKind], done_event: cupy.cuda.Event, stencil_id: int):
@@ -231,11 +239,18 @@ class AsyncContext():
         for i in range(len(self.stream_pool)):
             self.stream_pool[i] = None
 
+    def __del__(self):
+        self.wait_finish()
+
     def schedule(self, stencil: StencilObject, *args, **kwargs):
-        if self.blocking:
-            stencil(*args, **kwargs)
-        else:
+        if stencil.backend == "gtc:cuda" and not self.blocking:
             self.async_schedule(stencil, *args, **kwargs)
+        elif self.blocking:
+            stencil(*args, **kwargs)
+        else: # non-blocking
+            warnings.warn(f"Backend: {stencil.backend} does not support async launching, use blocking behavior instead")
+            self.wait()
+            stencil(*args, **kwargs)
 
     def async_schedule(self, stencil: StencilObject, *args, **kwargs):
         """
@@ -258,8 +273,9 @@ class AsyncContext():
         has_kernel_dependency_info = stencil.pyext_module.has_dependency_info()
 
         # resolve dependency
-        access_info = self.get_field_access_info(stencil, *args, **kwargs)
         stencil_id = self.get_stencil_id()
+        access_info = self.get_field_access_info(stencil_id, stencil, *args, **kwargs)
+
         if self._graph_record:
             self.graph_add_stencil(stencil, access_info, stencil_id)
         dep_events = self.get_dependencies(access_info, stencil_id)
@@ -290,6 +306,14 @@ class AsyncContext():
 
         # update async_ctx
         self.add_invoked_stencil(stencil, access_info, done_events[0], stencil_id)
+
+def async_stencil(async_context: AsyncContext, *, backend, **gtstencil_kwargs):
+    def decorator(func):
+        stencil = gtstencil(backend, func, **gtstencil_kwargs)
+        def wrapper(*args, **kwargs):
+            async_context.schedule(stencil, *args, **kwargs)
+        return wrapper
+    return decorator
 
 class InsertAsync(ast.NodeTransformer):
     @classmethod

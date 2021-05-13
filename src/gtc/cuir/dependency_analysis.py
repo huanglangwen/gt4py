@@ -25,7 +25,8 @@ class DependencyAnalysis(NodeTranslator):
     """
 
     def visit_Program(self, node: cuir.Program) -> cuir.Program:
-        dependency_arr: List[List[int]] = [[] for _ in range(len(node.kernels))]
+        dependency_arr_full: List[List[int]] = [[] for _ in range(len(node.kernels))] # with full transitive relation
+        dependency_arr: List[List[int]] = [[] for _ in range(len(node.kernels))] # without transitive relation
         writes = []
         reads = []
         for i in range(len(node.kernels)):
@@ -45,14 +46,23 @@ class DependencyAnalysis(NodeTranslator):
                 .to_set() - writes[i]
             )
             for j in reversed(range(0, i)):
+                dep_flag = False
                 # R -> W, W -> W
                 if writes[i].intersection(writes[j].union(reads[j])):
-                    dependency_arr[i].append(j)
-                    continue
+                    dep_flag = True
                 # W -> R
                 if reads[i].intersection(writes[j]):
-                    dependency_arr[i].append(j)
-                    continue
+                    dep_flag = True
+                if dep_flag:
+                    transitive_flag = False
+                    for k in dependency_arr_full[i]:
+                        # j -> k -> i implies j -> i
+                        if j in dependency_arr_full[k]:
+                            transitive_flag = True
+                            break
+                    if not transitive_flag:
+                        dependency_arr[i].append(j)
+                    dependency_arr_full[i].append(j)
         row_ind = list(accumulate([len(arr) for arr in dependency_arr], initial=0))
         col_ind = list(chain.from_iterable(dependency_arr))
         return cuir.Program(

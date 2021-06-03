@@ -49,10 +49,10 @@ class LastAccessStencil():
     last_write_stencil_id: Optional[int]
 
 class AsyncContext():
-    def __init__(self, num_streams, max_invoked_stencils = 50, blocking = False, sleep_time = 0.5, graph_record = False, name = None):
+    def __init__(self, num_streams, max_invoked_stencils = 50, blocking = False, sleep_time = 0.5, graph_record = False, name = None, profiling = False):
         self.stream_pool: List[Optional[cupy.cuda.Stream]] = []
         self.add_streams(num_streams)
-        self.last_accessor: Dict[str, LastAccessStencil] = dict() # Dict[field_name, LastAccessStencil]
+        self.last_access_stencil: Dict[str, LastAccessStencil] = dict() # Dict[field_name, LastAccessStencil]
         self.invoked_stencils: Deque[InvokedStencil] = deque()
         self.max_invoked_stencils: int = max_invoked_stencils
         self.known_num_fields: int = 0
@@ -60,6 +60,7 @@ class AsyncContext():
         self.sleep_time: float = sleep_time # (second) longer sleep saves cpu cycle but lower resolution in timing
         self._graph_record: bool = False
         self._stencil_id_ticket = 0
+        self._profiling: bool = profiling # TODO: deal with concurrent stencil
         if name is None:
             name = uuid4().hex[:5] # get a (almost) unique name
         self.name: str = name
@@ -168,12 +169,12 @@ class AsyncContext():
                 field_name = self.get_field_name(v)
                 access_kind = stencil.field_info[k].access
                 access_info[field_name] = access_kind
-                if field_name not in self.last_accessor:
-                    self.last_accessor[field_name] = LastAccessStencil(None, None)
+                if field_name not in self.last_access_stencil:
+                    self.last_access_stencil[field_name] = LastAccessStencil(None, None)
                 if access_kind == AccessKind.READ_ONLY:
-                    self.last_accessor[field_name].last_read_stencil_id = stencil_id
+                    self.last_access_stencil[field_name].last_read_stencil_id = stencil_id
                 if access_kind == AccessKind.READ_WRITE:
-                    self.last_accessor[field_name].last_write_stencil_id = stencil_id
+                    self.last_access_stencil[field_name].last_write_stencil_id = stencil_id
         return access_info
 
     def get_kernel_dependencies(self, stencil: StencilObject) -> Tuple[List[int], List[int]]: #(row_ind, col_ind)
@@ -212,12 +213,12 @@ class AsyncContext():
             # In case some stencils have finished but still have influence on dependency
             for field in writes:
                 # R -> W
-                dep_set.add(self.last_accessor[field].last_read_stencil_id)
+                dep_set.add(self.last_access_stencil[field].last_read_stencil_id)
                 # W -> W
-                dep_set.add(self.last_accessor[field].last_write_stencil_id)
+                dep_set.add(self.last_access_stencil[field].last_write_stencil_id)
             for field in reads:
                 # W -> R
-                dep_set.add(self.last_accessor[field].last_write_stencil_id)
+                dep_set.add(self.last_access_stencil[field].last_write_stencil_id)
             dep_set = dep_set - {stencil_id, None}
             for j in dep_set:
                 self.graph_add_stencil_dependency(stencil_id, j)

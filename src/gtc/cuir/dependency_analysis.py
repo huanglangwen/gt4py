@@ -16,14 +16,14 @@
 
 from eve import NodeTranslator
 from . import cuir
-from typing import List, Tuple
+from typing import List, Tuple, Optional, Set
 from itertools import accumulate, chain
 
 class DependencyAnalysis(NodeTranslator):
     """
     Dependency analysis for CUIR kernels, store dependency array in Program node
     """
-
+    # TODO: ignore false dependency introduced by aliasing temporary variables
     def visit_Program(self, node: cuir.Program) -> cuir.Program:
         dependency_arr_full: List[List[int]] = [[] for _ in range(len(node.kernels))] # with full transitive relation
         dependency_arr: List[List[int]] = [[] for _ in range(len(node.kernels))] # without transitive relation
@@ -68,5 +68,66 @@ class DependencyAnalysis(NodeTranslator):
         return cuir.Program(
             name=node.name, params=node.params,
             temporaries=node.temporaries,
-            kernels=node.kernels, dependency=(row_ind, col_ind)
+            kernels=node.kernels, dependency=cuir.DependencyGraph(row_ind=row_ind, col_ind=col_ind)
         )
+
+class FuseKernels(NodeTranslator):
+    """
+    Fuse Kernels based on dependency analysis
+    ==> K1 -> K2 -> K3 -> K4 ==>
+    Fused to
+    ==> Fused K ==>
+    """
+
+    def mark_fusable_kernels(self, graph: cuir.DependencyGraph):
+        row_ind = graph.row_ind
+        col_ind = graph.col_ind
+        num_kernels = len(row_ind)-1
+        degree_in: List[int] = [row_ind[i+1] - row_ind[i] for i in range(num_kernels)] # i -> degree_in_i
+        degree_out: List[int] = [col_ind.count(i) for i in range(num_kernels)]
+        unfused_kernels: Set[int] = set(range(num_kernels))
+
+        def prev_link(i) -> Optional[int]:
+            if degree_in[i] == 1:
+                prev = col_ind[row_ind[i]]
+                if degree_out[prev] == 1:
+                    return prev
+            return None
+
+        def find_link_end(unfused_kernels):
+            ret = None
+            for i in sorted(unfused_kernels, reverse=True):
+                if degree_in[i] == 1:
+                    prev = prev_link(i)
+                    if prev in unfused_kernels:
+                        ret = i
+                        break
+            return ret
+
+        fused_kernels: List[Set[int]] = []
+        link_end = find_link_end(unfused_kernels)
+        while link_end:
+            fused_kernels_i: Set[int] = {link_end}
+            prev = prev_link(link_end)
+            while prev in unfused_kernels:
+                fused_kernels_i.add(prev)
+                prev = prev_link(prev)
+            unfused_kernels = unfused_kernels - fused_kernels_i
+            fused_kernels.append(fused_kernels_i)
+            link_end = find_link_end(unfused_kernels)
+        return fused_kernels
+
+    @staticmethod
+    def is_parallel(kernel: cuir.Kernel) -> bool:
+        parallel = [
+            loop.loop_order == cuir.LoopOrder.PARALLEL for loop in kernel.vertical_loops
+        ]
+        assert all(parallel) or not any(parallel), "Mixed k-parallelism in kernel"
+        return any(parallel)
+
+    def visit_VerticalLoop(self, node: cuir.VerticalLoop, loop_order: Optional[cuir.LoopOrder]) -> cuir.VerticalLoop:
+        pass
+
+    def visit_Program(self, node: cuir.Program) -> cuir.Program:
+        fusable_kernels = self.mark_fusable_kernels(node.dependency)
+        fused_kernel_inds: List[Optional[int]] = [None] * len(fusable_kernels)

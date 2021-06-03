@@ -372,8 +372,8 @@ class CUIRCodegen(codegen.TemplatedGenerator):
         
         constexpr int NUM_KERNELS = ${len(_this_node.kernels)};
         <%
-        dependency_row_ind = _this_node.dependency[0]
-        dependency_col_ind = _this_node.dependency[1]
+        dependency_row_ind = _this_node.dependency.row_ind
+        dependency_col_ind = _this_node.dependency.col_ind
         %>
         % if _this_node.dependency:
         constexpr bool DEPENDENCY = true;

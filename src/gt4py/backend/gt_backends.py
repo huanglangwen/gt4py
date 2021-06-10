@@ -31,6 +31,7 @@ from gt4py import utils as gt_utils
 from gt4py.utils import text as gt_text
 
 from . import pyext_builder
+from .module_generator import CUDAPyExtModuleGenerator, PyExtModuleGenerator
 
 
 if TYPE_CHECKING:
@@ -100,14 +101,14 @@ def mc_is_compatible_layout(field: "Storage") -> bool:
     return True
 
 
-def cuda_layout(mask: Tuple[int, ...]) -> Tuple[Optional[int], ...]:
+def make_cuda_layout_map(mask: Tuple[int, ...]) -> Tuple[Optional[int], ...]:
     ctr = reversed(range(sum(mask)))
     return tuple([next(ctr) if m else None for m in mask])
 
 
 def cuda_is_compatible_layout(field: "Storage") -> bool:
     stride = 0
-    layout_map = cuda_layout(field.mask)
+    layout_map = make_cuda_layout_map(field.mask)
     flattened_layout = [index for index in layout_map if index is not None]
     if len(field.strides) < len(flattened_layout):
         return False
@@ -122,6 +123,87 @@ def cuda_is_compatible_type(field: Any) -> bool:
     from gt4py.storage.storage import ExplicitlySyncedGPUStorage, GPUStorage
 
     return isinstance(field, (GPUStorage, ExplicitlySyncedGPUStorage))
+
+
+class LowerHorizontalIfPass(gt_ir.IRNodeMapper):
+    @classmethod
+    def apply(cls, impl_node: gt_ir.StencilImplementation) -> None:
+        cls(impl_node.domain).visit(impl_node)
+
+    def __init__(self, domain: gt_ir.Domain):
+        self.domain = domain
+        self.extent: Optional[gt_ir.Extent] = None
+
+    def visit_Stage(
+        self, path: tuple, node_name: str, node: gt_ir.Stage
+    ) -> Tuple[bool, gt_ir.Stage]:
+        self.extent = node.compute_extent
+        return self.generic_visit(path, node_name, node)
+
+    def visit_HorizontalIf(
+        self, path: tuple, node_name: str, node: gt_ir.HorizontalIf
+    ) -> Tuple[bool, gt_ir.If]:
+        assert self.extent is not None
+
+        conditions = []
+        for axis, interval in node.intervals.items():
+            extent = self.extent[self.domain.index(axis)]
+
+            if (
+                interval.start.level == interval.end.level
+                and interval.start.offset == interval.end.offset - 1
+            ):
+                # Use a single condition
+                conditions.append(
+                    gt_ir.BinOpExpr(
+                        op=gt_ir.BinaryOperator.EQ,
+                        lhs=gt_ir.AxisIndex(axis=axis),
+                        rhs=gt_ir.AxisOffset(
+                            axis=axis, endpt=interval.start.level, offset=interval.start.offset
+                        ),
+                    )
+                )
+            else:
+                # start
+                if (
+                    interval.start.level != gt_ir.LevelMarker.START
+                    or interval.start.offset > extent[0]
+                ):
+                    conditions.append(
+                        gt_ir.BinOpExpr(
+                            op=gt_ir.BinaryOperator.GE,
+                            lhs=gt_ir.AxisIndex(axis=axis),
+                            rhs=gt_ir.AxisOffset(
+                                axis=axis, endpt=interval.start.level, offset=interval.start.offset
+                            ),
+                        )
+                    )
+
+                # end
+                if interval.end.level != gt_ir.LevelMarker.END or interval.end.offset < extent[1]:
+                    conditions.append(
+                        gt_ir.BinOpExpr(
+                            op=gt_ir.BinaryOperator.LT,
+                            lhs=gt_ir.AxisIndex(axis=axis),
+                            rhs=gt_ir.AxisOffset(
+                                axis=axis, endpt=interval.end.level, offset=interval.end.offset
+                            ),
+                        )
+                    )
+
+        if conditions:
+            return (
+                True,
+                gt_ir.If(
+                    condition=functools.reduce(
+                        lambda x, y: gt_ir.BinOpExpr(op=gt_ir.BinaryOperator.AND, lhs=x, rhs=y),
+                        conditions,
+                    ),
+                    main_body=node.body,
+                ),
+            )
+        else:
+            return True, node.body
 
 
 class _MaxKOffsetExtractor(gt_ir.IRNodeVisitor):
@@ -270,9 +352,15 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
 
     def visit_FieldRef(self, node: gt_ir.FieldRef, **kwargs: Any) -> str:
         assert node.name in self.apply_block_symbols
+        if node.data_index:
+            raise ValueError("Only scalar fields are supported.")
+
         offset = [node.offset.get(name, 0) for name in self.domain.axes_names]
         if not all(i == 0 for i in offset):
-            idx = ", ".join(str(i) for i in offset)
+            source_offsets = [
+                f"int({self.visit(i)})" if isinstance(i, gt_ir.Expr) else str(i) for i in offset
+            ]
+            idx = ", ".join(source_offsets)
         else:
             idx = ""
         source = "eval({name}({idx}))".format(name=node.name, idx=idx)
@@ -375,6 +463,15 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
         body_sources.append("}")
         return body_sources
 
+    def visit_While(self, node: gt_ir.While) -> gt_text.TextBlock:
+        body_sources = gt_text.TextBlock()
+        body_sources.append("while ({condition}) {{".format(condition=self.visit(node.condition)))
+        for stmt in node.body.stmts:
+            body_sources.extend(self.visit(stmt))
+
+        body_sources.append("}")
+        return body_sources
+
     def visit_AxisBound(self, node: gt_ir.AxisBound) -> Tuple[int, int]:
         if node.level == gt_ir.LevelMarker.START:
             level = 0
@@ -399,6 +496,17 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
 
         return (start_splitter, start_offset), (end_splitter, end_offset)
 
+    def visit_AxisIndex(self, node: gt_ir.AxisIndex) -> str:
+        return f"eval.{node.axis.lower()}()"
+
+    def visit_AxisOffset(self, node: gt_ir.AxisOffset) -> str:
+        return "static_cast<gt::int_t>({endpt}{offset:+d})".format(
+            endpt=f"eval(domain_size_{node.axis.upper()}())"
+            if node.endpt == gt_ir.LevelMarker.END
+            else "0",
+            offset=node.offset,
+        )
+
     def visit_ApplyBlock(
         self, node: gt_ir.ApplyBlock
     ) -> Tuple[Tuple[Tuple[int, int], Tuple[int, int]], str]:
@@ -421,6 +529,10 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
         # Initialize symbols for the generation of references in this stage
         self.stage_symbols = {}
         args = []
+        fields_with_variable_offset = set()
+        for field_ref in gt_ir.filter_nodes_dfs(node, gt_ir.FieldRef):
+            if isinstance(field_ref.offset.get(self.domain.sequential_axis.name, None), gt_ir.Expr):
+                fields_with_variable_offset.add(field_ref.name)
         for accessor in node.accessors:
             self.stage_symbols[accessor.symbol] = accessor
             arg = {"name": accessor.symbol, "access_type": "in", "extent": None}
@@ -428,8 +540,19 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
                 arg["access_type"] = (
                     "in" if accessor.intent == gt_ir.AccessIntent.READ_ONLY else "inout"
                 )
-                arg["extent"] = gt_utils.flatten(accessor.extent)
+                if accessor.symbol not in fields_with_variable_offset:
+                    arg["extent"] = gt_utils.flatten(accessor.extent)
+                else:
+                    arg["extent"] = gt_utils.flatten(accessor.extent[:-1]) + [-1000, 1000]
             args.append(arg)
+
+        if len(tuple(gt_ir.filter_nodes_dfs(node, gt_ir.AxisIndex))) > 0:
+            args.extend(
+                [
+                    {"name": f"domain_size_{name}", "access_type": "in", "extent": None}
+                    for name in self.domain.axes_names
+                ]
+            )
 
         # Create regions and computations
         regions = []
@@ -495,10 +618,19 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
             if name not in node.unreferenced
         ]
 
+        stage_extents = {}
+        requires_positional = len(tuple(gt_ir.filter_nodes_dfs(node, gt_ir.AxisIndex))) > 0
         stage_functors = {}
         for multi_stage in node.multi_stages:
             for group in multi_stage.groups:
                 for stage in group.stages:
+                    compute_extent = stage.compute_extent
+                    extents: List[int] = []
+                    for i in range(compute_extent.ndims - 1):
+                        extents.extend(
+                            (compute_extent.lower_indices[i], compute_extent.upper_indices[i])
+                        )
+                    stage_extents[stage.name] = ", ".join([str(extent) for extent in extents])
                     stage_functors[stage.name] = self.visit(stage)
 
         multi_stages = []
@@ -514,9 +646,11 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
             halo_sizes=halo_sizes,
             k_axis=k_axis,
             module_name=self.module_name,
+            requires_positional=requires_positional,
             multi_stages=multi_stages,
             parameters=parameters,
             stage_functors=stage_functors,
+            stage_extents=stage_extents,
             stencil_unique_name=self.class_name,
             tmp_fields=tmp_fields,
         )
@@ -542,7 +676,9 @@ class BaseGTBackend(gt_backend.BasePyExtBackend, gt_backend.CLIBackendMixin):
 
     GT_BACKEND_T: str
 
-    MODULE_GENERATOR_CLASS = gt_backend.PyExtModuleGenerator
+    MODULE_GENERATOR_CLASS = PyExtModuleGenerator
+
+    USE_LEGACY_TOOLCHAIN = True
 
     PYEXT_GENERATOR_CLASS = GTPyExtGenerator
 
@@ -550,6 +686,9 @@ class BaseGTBackend(gt_backend.BasePyExtBackend, gt_backend.CLIBackendMixin):
         self.check_options(self.builder.options)
 
         implementation_ir = self.builder.implementation_ir
+
+        # Lower HorizontalIf to If
+        LowerHorizontalIfPass.apply(self.builder.implementation_ir)
 
         # Generate the Python binary extension (checking if GridTools sources are installed)
         if not gt_src_manager.has_gt_sources() and not gt_src_manager.install_gt_sources():
@@ -691,12 +830,10 @@ class GTMCBackend(BaseGTBackend):
         return self.make_extension(uses_cuda=False)
 
 
-class GTCUDAPyModuleGenerator(gt_backend.CUDAPyExtModuleGenerator):
+class GTCUDAPyModuleGenerator(CUDAPyExtModuleGenerator):
     def generate_pre_run(self) -> str:
         field_names = [
-            key
-            for key in self.args_data["field_info"]
-            if self.args_data["field_info"][key] is not None
+            key for key in self.args_data.field_info if self.args_data.field_info[key] is not None
         ]
 
         return "\n".join([f + ".host_to_device()" for f in field_names])
@@ -704,7 +841,7 @@ class GTCUDAPyModuleGenerator(gt_backend.CUDAPyExtModuleGenerator):
     def generate_post_run(self) -> str:
         output_field_names = [
             name
-            for name, info in self.args_data["field_info"].items()
+            for name, info in self.args_data.field_info.items()
             if info is not None and info.access == gt_definitions.AccessKind.READ_WRITE
         ]
 
@@ -719,11 +856,11 @@ class GTCUDABackend(BaseGTBackend):
     GT_BACKEND_T = "cuda"
 
     name = "gtcuda"
-    options = BaseGTBackend.GT_BACKEND_OPTS
+    options = {**BaseGTBackend.GT_BACKEND_OPTS, "device_sync": {"versioning": True, "type": bool}}
     storage_info = {
         "alignment": 32,
         "device": "gpu",
-        "layout_map": cuda_layout,
+        "layout_map": make_cuda_layout_map,
         "is_compatible_layout": cuda_is_compatible_layout,
         "is_compatible_type": cuda_is_compatible_type,
     }

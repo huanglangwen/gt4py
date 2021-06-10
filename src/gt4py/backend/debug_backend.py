@@ -14,7 +14,7 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, List
 
 import numpy as np
 
@@ -23,6 +23,7 @@ from gt4py import definitions as gt_definitions
 from gt4py import ir as gt_ir
 from gt4py.utils import text as gt_text
 
+from .module_generator import BaseModuleGenerator
 from .python_generator import PythonSourceGenerator
 
 
@@ -62,8 +63,10 @@ class DebugSourceGenerator(PythonSourceGenerator):
 
         return source_lines
 
-    def make_temporary_field(self, name: str, dtype: gt_ir.DataType, extent: gt_definitions.Extent):
-        source_lines = super().make_temporary_field(name, dtype, extent)
+    def make_temporary_field(
+        self, name: str, dtype: gt_ir.DataType, axes: list, extent: gt_definitions.Extent
+    ):
+        source_lines = super().make_temporary_field(name, dtype, axes, extent)
         source_lines.extend(self._make_field_accessor(name, extent.to_boundary().lower_indices))
 
         return source_lines
@@ -109,15 +112,22 @@ class DebugSourceGenerator(PythonSourceGenerator):
     # ---- Visitor handlers ----
     def visit_FieldRef(self, node: gt_ir.FieldRef):
         assert node.name in self.block_info.accessors
+
         index = []
         for ax in self.impl_node.fields[node.name].axes:
-            offset = "{:+d}".format(node.offset[ax]) if ax in node.offset else ""
+            if isinstance(node.offset[ax], gt_ir.Expr):
+                offset = f"+ {self.visit(node.offset[ax])}"
+            else:
+                offset = "{:+d}".format(node.offset[ax])
             index.append("{ax}{offset}".format(ax=ax, offset=offset))
 
         index_str = f"({index[0]},)" if len(index) == 1 else ", ".join(index)
+
         source = "{name}{marker}[{index}]".format(
             marker=self.origin_marker, name=node.name, index=index_str
         )
+        if node.data_index:
+            source = f"{source}[{','.join(str(i) for i in node.data_index)}]"
 
         return source
 
@@ -162,8 +172,57 @@ class DebugSourceGenerator(PythonSourceGenerator):
             body_sources.dedent()
         return ["".join([str(item) for item in line]) for line in body_sources.lines]
 
+    def visit_While(self, node: gt_ir.While):
+        body_sources = gt_text.TextBlock()
+        body_sources.append("while {condition}:".format(condition=self.visit(node.condition)))
+        body_sources.indent()
+        for stmt in node.body.stmts:
+            body_sources.extend(self.visit(stmt))
+        return body_sources.text
 
-class DebugModuleGenerator(gt_backend.BaseModuleGenerator):
+    def _make_base_offset(self, bound: gt_ir.AxisBound, index: int) -> str:
+        if bound.level == gt_ir.LevelMarker.START:
+            return "{:d}".format(bound.offset)
+        else:
+            return "{:s}[:d] {:+d}".format(self.domain_arg_name, index, bound.offset)
+
+    def _create_horizontal_conditional(
+        self, axis_name: str, index: int, interval: gt_ir.AxisInterval
+    ) -> str:
+        extent = self.block_info.extent[index]
+        if (
+            interval.start.level == interval.end.level
+            and interval.start.offset == interval.end.offset - 1
+        ):
+            return f"{axis_name} == {self._make_base_offset(interval.start, index)}"
+        else:
+            conditions = ""
+            if interval.start.level != gt_ir.LevelMarker.START or interval.start.offset > extent[0]:
+                conditions.append(f"{axis_name} >= {self._make_base_offset(interval.start, index)}")
+            if interval.end.level != gt_ir.LevelMarker.END or interval.end.offset < extent[1]:
+                conditions.append(f"{axis_name} < {self._make_base_offset(interval.end, index)}")
+            return " and ".join(conditions)
+
+    def visit_HorizontalIf(self, node: gt_ir.HorizontalIf) -> List[str]:
+        source = gt_text.TextBlock()
+
+        conditions = [
+            self._create_horizontal_conditional(axis_name, index, node.intervals[axis_name])
+            for index, axis_name in enumerate(
+                (axis.name for axis in gt_ir.Domain.LatLonGrid().parallel_axes)
+            )
+        ]
+
+        source.append("if " + " and ".join([cond for cond in conditions if cond != ""]) + ":")
+
+        source.indent()
+        for stmt in node.body.stmts:
+            source.extend(self.visit(stmt))
+
+        return ["".join([str(item) for item in line]) for line in source.lines]
+
+
+class DebugModuleGenerator(BaseModuleGenerator):
     def __init__(self):
         super().__init__()
         self.source_generator = DebugSourceGenerator(
@@ -240,3 +299,4 @@ class DebugBackend(gt_backend.BaseBackend, gt_backend.PurePythonBackendCLIMixin)
     languages = {"computation": "python", "bindings": []}
 
     MODULE_GENERATOR_CLASS = DebugModuleGenerator
+    USE_LEGACY_TOOLCHAIN = True

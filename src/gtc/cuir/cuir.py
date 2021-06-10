@@ -80,6 +80,11 @@ class AssignStmt(
     _dtype_validation = common.assign_stmt_dtype_validation(strict=True)
 
 
+class MaskStmt(Stmt):
+    mask: Expr
+    body: List[Stmt]
+
+
 class UnaryOp(common.UnaryOp[Expr], Expr):
     pass
 
@@ -111,7 +116,7 @@ class Decl(LocNode):
 
 
 class FieldDecl(Decl):
-    pass
+    dimensions: Tuple[bool, bool, bool]
 
 
 class ScalarDecl(Decl):
@@ -176,7 +181,6 @@ class KCacheDecl(Decl):
 
 class HorizontalExecution(LocNode):
     body: List[Stmt]
-    mask: Optional[Expr]
     declarations: List[LocalScalar]
     extent: Optional[IJExtent]
 

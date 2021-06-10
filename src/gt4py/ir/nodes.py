@@ -83,20 +83,25 @@ storing a reference to the piece of source code which originated the node.
 
     Axis(name: str)
 
-    Domain(parallel_axes: List[Axis], [sequential_axis: Axis, data_axes: List[Axis]])
-        # LatLonGrids -> parallel_axes: ["I", "J], sequential_axis: "K"
+    Domain(parallel_axes: List[Axis], [sequential_axis: Axis])
+        # LatLonGrids -> parallel_axes: ["I", "J"], sequential_axis: "K"
 
     Literal     = ScalarLiteral(value: Any (should match DataType), data_type: DataType)
                 | BuiltinLiteral(value: Builtin)
 
     Ref         = VarRef(name: str, [index: int])
-                | FieldRef(name: str, offset: Dict[str, int])
+                | FieldRef(name: str, offset: Dict[str, int | Expr])
+                # Horizontal indices must be ints
 
     NativeFuncCall(func: NativeFunction, args: List[Expr], data_type: DataType)
 
-    Cast(dtype: DataType, expr: Expr)
+    Cast(expr: Expr, data_type: DataType)
 
-    Expr        = Literal | Ref | NativeFuncCall | Cast | CompositeExpr | InvalidBranch
+    AxisIndex(axis: str, data_type: DataType)
+
+    AxisOffset(axis: str, endpt: LevelMarker, offset: int, data_type: DataType)
+
+    Expr        = Literal | Ref | NativeFuncCall | Cast | CompositeExpr | InvalidBranch | AxisIndex | AxisOffset
 
     CompositeExpr   = UnaryOpExpr(op: UnaryOperator, arg: Expr)
                     | BinOpExpr(op: BinaryOperator, lhs: Expr, rhs: Expr)
@@ -112,6 +117,8 @@ storing a reference to the piece of source code which originated the node.
     Statement   = Decl
                 | Assign(target: Ref, value: Expr)
                 | If(condition: expr, main_body: BlockStmt, else_body: BlockStmt)
+                | While(condition: expr, body: BlockStmt)
+                | HorizontalIf(intervals: Dict[str, Interval], body: BlockStmt)
                 | BlockStmt
 
     AxisBound(level: LevelMarker | VarRef, offset: int)
@@ -216,11 +223,19 @@ class Axis(Node):
     name = attribute(of=str)
 
 
+@enum.unique
+class LevelMarker(enum.Enum):
+    START = 0
+    END = -1
+
+    def __str__(self):
+        return self.name
+
+
 @attribclass
 class Domain(Node):
     parallel_axes = attribute(of=ListOf[Axis])
     sequential_axis = attribute(of=Axis, optional=True)
-    data_axes = attribute(of=ListOf[Axis], optional=True)
 
     @classmethod
     def LatLonGrid(cls):
@@ -237,8 +252,6 @@ class Domain(Node):
         result = list(self.parallel_axes)
         if self.sequential_axis:
             result.append(self.sequential_axis)
-        if self.data_axes:
-            result.extend(self.data_axes)
         return result
 
     @property
@@ -246,16 +259,10 @@ class Domain(Node):
         return [ax.name for ax in self.axes]
 
     @property
-    def ndims(self):
-        return self.domain_ndims + self.data_ndims
-
-    @property
     def domain_ndims(self):
         return len(self.parallel_axes) + (1 if self.sequential_axis else 0)
 
-    @property
-    def data_ndims(self):
-        return len(self.data_axes) if self.data_axes else 0
+    ndims = domain_ndims
 
     def index(self, axis):
         if isinstance(axis, Axis):
@@ -393,7 +400,8 @@ class VarRef(Ref):
 @attribclass
 class FieldRef(Ref):
     name = attribute(of=str)
-    offset = attribute(of=DictOf[str, int])
+    offset = attribute(of=DictOf[str, UnionOf[int, Expr]])
+    data_index = attribute(of=ListOf[int], factory=list)
     loc = attribute(of=Location, optional=True)
 
     @classmethod
@@ -406,6 +414,20 @@ class Cast(Expr):
     data_type = attribute(of=DataType)
     expr = attribute(of=Expr)
     loc = attribute(of=Location, optional=True)
+
+
+@attribclass
+class AxisIndex(Expr):
+    axis = attribute(of=str)
+    data_type = attribute(of=DataType, default=DataType.INT32)
+
+
+@attribclass
+class AxisOffset(Expr):
+    axis = attribute(of=str)
+    endpt = attribute(of=LevelMarker)
+    offset = attribute(of=int)
+    data_type = attribute(of=DataType, default=DataType.INT32)
 
 
 @enum.unique
@@ -609,6 +631,7 @@ class FieldDecl(Decl):
     data_type = attribute(of=DataType)
     axes = attribute(of=ListOf[str])
     is_api = attribute(of=bool)
+    data_dims = attribute(of=ListOf[int], factory=list)
     layout_id = attribute(of=str, default="_default_")
     loc = attribute(of=Location, optional=True)
 
@@ -652,16 +675,14 @@ class If(Statement):
     loc = attribute(of=Location, optional=True)
 
 
+@attribclass
+class While(Statement):
+    condition = attribute(of=Expr)
+    body = attribute(of=BlockStmt)
+    loc = attribute(of=Location, optional=True)
+
+
 # ---- IR: computations ----
-@enum.unique
-class LevelMarker(enum.Enum):
-    START = 0
-    END = -1
-
-    def __str__(self):
-        return self.name
-
-
 @enum.unique
 class IterationOrder(enum.Enum):
     BACKWARD = -1
@@ -714,6 +735,13 @@ class AxisInterval(Node):
             )
 
         return interval
+
+
+# TODO Find a better place for this in the file.
+@attribclass
+class HorizontalIf(Statement):
+    intervals = attribute(of=DictOf[str, AxisInterval])
+    body = attribute(of=BlockStmt)
 
 
 @attribclass
@@ -1005,3 +1033,27 @@ class IRNodeDumper(IRNodeMapper):
 
 
 dump_ir = IRNodeDumper.apply
+
+
+def filter_nodes_dfs(root_node, node_type):
+    """Yield an iterator over the nodes of node_type inside root_node in DFS order."""
+    stack = [root_node]
+    while stack:
+        curr = stack.pop()
+        assert isinstance(curr, Node)
+
+        for node_class in curr.__class__.__mro__:
+            if node_class is node_type:
+                yield curr
+
+        for key, value in iter_attributes(curr):
+            if isinstance(curr, collections.abc.Iterable):
+                if isinstance(curr, collections.abc.Mapping):
+                    children = curr.values()
+                else:
+                    children = curr
+            else:
+                children = gt_utils.listify(value)
+
+            for value in filter(lambda x: isinstance(x, Node), children):
+                stack.append(value)

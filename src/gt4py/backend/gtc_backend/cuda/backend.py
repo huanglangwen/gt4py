@@ -16,6 +16,7 @@
 
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Type
 
+import gtc.utils as gtc_utils
 from eve import codegen
 from eve.codegen import MakoTemplate as as_mako
 from gt4py import definitions as gt_definitions
@@ -27,7 +28,7 @@ from gt4py.backend.gt_backends import (
     GTCUDAPyModuleGenerator,
     cuda_is_compatible_layout,
     cuda_is_compatible_type,
-    cuda_layout,
+    make_cuda_layout_map,
 )
 from gt4py.backend.gtc_backend.defir_to_gtir import DefIRToGTIR
 from gtc import gtir_to_oir
@@ -103,29 +104,35 @@ class GTCCudaBindingsCodegen(codegen.TemplatedGenerator):
         return self._unique_index
 
     def visit_DataType(self, dtype: DataType, **kwargs):
-        if dtype == DataType.INT64:
-            return "long long"
-        elif dtype == DataType.FLOAT64:
-            return "double"
-        elif dtype == DataType.FLOAT32:
-            return "float"
-        elif dtype == DataType.BOOL:
-            return "bool"
-        else:
-            raise AssertionError(f"Invalid DataType value: {dtype}")
+        return cuir_codegen.CUIRCodegen().visit_DataType(dtype)
 
     def visit_FieldDecl(self, node: cuir.FieldDecl, **kwargs):
         if "external_arg" in kwargs:
             if kwargs["external_arg"]:
-                return "py::buffer {name}, std::array<gt::uint_t,3> {name}_origin".format(
-                    name=node.name
+                return "py::buffer {name}, std::array<gt::uint_t,{ndim}> {name}_origin".format(
+                    name=node.name,
+                    ndim=node.dimensions.count(True),
                 )
             else:
-                return """gt::sid::shift_sid_origin(gt::as_cuda_sid<{dtype}, 3,
-                    std::integral_constant<int, {unique_index}>>({name}), {name}_origin)""".format(
+                num_dims = node.dimensions.count(True)
+                sid_def = """gt::as_cuda_sid<{dtype}, {num_dims},
+                    std::integral_constant<int, {unique_index}>>({name})""".format(
                     name=node.name,
                     dtype=self.visit(node.dtype),
                     unique_index=self.unique_index(),
+                    num_dims=num_dims,
+                )
+                if num_dims != 3:
+                    gt_dims = [
+                        f"gt::stencil::dim::{dim}"
+                        for dim in gtc_utils.dimension_flags_to_names(node.dimensions)
+                    ]
+                    sid_def = "gt::sid::rename_numbered_dimensions<{gt_dims}>({sid_def})".format(
+                        gt_dims=", ".join(gt_dims), sid_def=sid_def
+                    )
+                return "gt::sid::shift_sid_origin({sid_def}, {name}_origin)".format(
+                    sid_def=sid_def,
+                    name=node.name,
                 )
 
     def visit_ScalarDecl(self, node: cuir.ScalarDecl, **kwargs):
@@ -154,6 +161,7 @@ class GTCCudaBindingsCodegen(codegen.TemplatedGenerator):
         #include <gridtools/storage/adapter/python_sid_adapter.hpp>
         #include <gridtools/stencil/global_parameter.hpp>
         #include <gridtools/sid/sid_shift_origin.hpp>
+        #include <gridtools/sid/rename_dimensions.hpp>
         #include "computation.hpp"
         namespace gt = gridtools;
         namespace py = ::pybind11;
@@ -297,7 +305,7 @@ class GTCCudaBackend(BaseGTBackend, CLIBackendMixin):
     storage_info = {
         "alignment": 32,
         "device": "gpu",
-        "layout_map": cuda_layout,
+        "layout_map": make_cuda_layout_map,
         "is_compatible_layout": cuda_is_compatible_layout,
         "is_compatible_type": cuda_is_compatible_type,
     }

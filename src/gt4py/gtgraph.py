@@ -169,13 +169,16 @@ class AsyncContext():
                 field_name = self.get_field_name(v)
                 access_kind = stencil.field_info[k].access
                 access_info[field_name] = access_kind
-                if field_name not in self.last_access_stencil:
-                    self.last_access_stencil[field_name] = LastAccessStencil(None, None)
-                if access_kind == AccessKind.READ_ONLY:
-                    self.last_access_stencil[field_name].last_read_stencil_id = stencil_id
-                if access_kind == AccessKind.READ_WRITE:
-                    self.last_access_stencil[field_name].last_write_stencil_id = stencil_id
         return access_info
+
+    def update_last_access_stencil(self, stencil_id: int, access_info: Dict[str, AccessKind]):
+        for field_name, access_kind in access_info.items():
+            if field_name not in self.last_access_stencil:
+                self.last_access_stencil[field_name] = LastAccessStencil(None, None)
+            if access_kind == AccessKind.READ_ONLY:
+                self.last_access_stencil[field_name].last_read_stencil_id = stencil_id
+            if access_kind == AccessKind.READ_WRITE:
+                self.last_access_stencil[field_name].last_write_stencil_id = stencil_id
 
     def get_kernel_dependencies(self, stencil: StencilObject) -> Tuple[List[int], List[int]]: #(row_ind, col_ind)
         assert hasattr(stencil, "pyext_module")
@@ -211,12 +214,12 @@ class AsyncContext():
                     dep_set.add(stencil_i.id)
         if self._graph_record:
             # In case some stencils have finished but still have influence on dependency
-            for field in writes:
+            for field in writes.intersection(self.last_access_stencil.keys()):
                 # R -> W
                 dep_set.add(self.last_access_stencil[field].last_read_stencil_id)
                 # W -> W
                 dep_set.add(self.last_access_stencil[field].last_write_stencil_id)
-            for field in reads:
+            for field in reads.intersection(self.last_access_stencil.keys()):
                 # W -> R
                 dep_set.add(self.last_access_stencil[field].last_write_stencil_id)
             dep_set = dep_set - {stencil_id, None}
@@ -280,6 +283,7 @@ class AsyncContext():
         if self._graph_record:
             self.graph_add_stencil(stencil, access_info, stencil_id)
         dep_events = self.get_dependencies(access_info, stencil_id)
+        self.update_last_access_stencil(stencil_id, access_info)
 
         # count how many streams needed
         num_streams = num_kernels if has_kernel_dependency_info else 1  # TODO: reduce unnecessary streams

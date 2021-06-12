@@ -246,9 +246,7 @@ def pyext_module(self):
 
     def generate_pre_run(self) -> str:
         field_names = [
-            key
-            for key in self.args_data["field_info"]
-            if self.args_data["field_info"][key] is not None
+            key for key in self.args_data.field_info if self.args_data.field_info[key] is not None
         ]
 
         return "\n".join([f + ".host_to_device()" for f in field_names])
@@ -256,7 +254,7 @@ def pyext_module(self):
     def generate_post_run(self) -> str:
         output_field_names = [
             name
-            for name, info in self.args_data["field_info"].items()
+            for name, info in self.args_data.field_info.items()
             if info is not None and info.access == gt_definitions.AccessKind.READ_WRITE
         ]
 
@@ -269,7 +267,7 @@ def pyext_module(self):
         args = []
         api_fields = set(field.name for field in definition_ir.api_fields)
         for arg in definition_ir.api_signature:
-            if arg.name not in self.args_data["unreferenced"]:
+            if arg.name not in self.args_data.unreferenced:
                 args.append(arg.name)
                 if arg.name in api_fields:
                     args.append("list(_origin_['{}'])".format(arg.name))

@@ -49,7 +49,7 @@ class LastAccessStencil():
     last_write_stencil_id: Optional[int]
 
 class AsyncContext():
-    def __init__(self, num_streams, max_invoked_stencils = 50, blocking = False, sleep_time = 0.5, graph_record = False, name = None, profiling = False):
+    def __init__(self, num_streams, max_invoked_stencils = 50, blocking = False, concurrent = True, sleep_time = 0.5, graph_record = False, name = None, profiling = False):
         self.stream_pool: List[Optional[cupy.cuda.Stream]] = []
         self.add_streams(num_streams)
         self.last_access_stencil: Dict[str, LastAccessStencil] = dict() # Dict[field_name, LastAccessStencil]
@@ -57,6 +57,7 @@ class AsyncContext():
         self.max_invoked_stencils: int = max_invoked_stencils
         self.known_num_fields: int = 0
         self.blocking: bool = blocking # synchronize all stencils, debug only
+        self.concurrent: bool = concurrent # only use root stream, debug only
         self.sleep_time: float = sleep_time # (second) longer sleep saves cpu cycle but lower resolution in timing
         self._graph_record: bool = False
         self._stencil_id_ticket = 0
@@ -234,9 +235,12 @@ class AsyncContext():
         self.invoked_stencils.append(InvokedStencil(stencil=stencil, access_info=access_info, done_event=done_event, id=stencil_id))
 
     def wait(self):
-        while len(self.invoked_stencils) > 0:
-            sleep(self.sleep_time)
-            self.free_finished_stencils()
+        if self.concurrent:
+            while len(self.invoked_stencils) > 0:
+                sleep(self.sleep_time)
+                self.free_finished_stencils()
+        else:
+            cupy.cuda.Stream.null.synchronize()
 
     def wait_finish(self):
         self.wait()
@@ -247,14 +251,19 @@ class AsyncContext():
         self.wait_finish()
 
     def schedule(self, stencil: StencilObject, *args, **kwargs):
-        if stencil.backend == "gtc:cuda" and not self.blocking:
-            self.async_schedule(stencil, *args, **kwargs)
-        elif self.blocking:
+        if self.blocking:
             stencil(*args, **kwargs)
-        else: # non-blocking
+        elif stencil.backend == "gtc:cuda":
+            if not self.concurrent:
+                num_kernels = stencil.pyext_module.num_kernels()
+                stencil(*args, async_launch=True, streams=[0]*num_kernels, **kwargs)
+            elif not self.blocking:
+                self.async_schedule(stencil, *args, **kwargs)
+        else:
             warnings.warn(f"Backend: {stencil.backend} does not support async launching, use blocking behavior instead")
             self.wait()
             stencil(*args, **kwargs)
+
 
     def async_schedule(self, stencil: StencilObject, *args, **kwargs):
         """

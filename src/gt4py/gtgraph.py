@@ -166,7 +166,7 @@ class AsyncContext():
         access_info = {}
         stencil_sig_bind = inspect.signature(stencil).bind(*args, **kwargs)
         for k, v in stencil_sig_bind.arguments.items():
-            if isinstance(v, Storage):
+            if isinstance(v, Storage) and stencil.field_info[k] is not None:
                 field_name = self.get_field_name(v)
                 access_kind = stencil.field_info[k].access
                 access_info[field_name] = access_kind

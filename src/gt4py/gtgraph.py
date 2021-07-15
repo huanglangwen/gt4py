@@ -24,7 +24,7 @@ import inspect
 
 import cupy.cuda
 import astor
-from typing import Any, Callable, Dict, Tuple, List, Deque, Optional
+from typing import Any, Callable, Dict, Tuple, List, Deque, Optional, Set, Iterable
 from gt4py.stencil_object import StencilObject
 from gt4py import AccessKind
 from gt4py.storage import Storage
@@ -35,6 +35,7 @@ from time import sleep
 from graphviz import Digraph
 from uuid import uuid4
 import warnings
+from copy import deepcopy
 
 @dataclass
 class InvokedStencil():
@@ -48,9 +49,36 @@ class LastAccessStencil():
     last_read_stencil_id: Optional[int]
     last_write_stencil_id: Optional[int]
 
+class RuntimeGraph():
+    def __init__(self):
+        self.adjoint_nodes: List[Set[int]] = []
+        self.connected_nodes: List[Set[int]] = [] # Transitive closure
+        self._stencil_id_ticket = 0
+
+    def get_stencil_id(self):
+        stencil_id = self._stencil_id_ticket
+        self._stencil_id_ticket += 1
+        self.adjoint_nodes.append(set())
+        self.connected_nodes.append(set())
+        return stencil_id
+
+    def add_stencil(self, stencil_id: int, denpendencies: Iterable[int]):
+        connected_set = set(denpendencies)
+        connected_set.update(i for j in denpendencies for i in self.connected_nodes[j])
+        self.connected_nodes[stencil_id] = connected_set
+        adjoint_set = set()
+        for dep_i in sorted(denpendencies):
+            adjoint_set.difference_update(self.connected_nodes[dep_i])
+            adjoint_set.add(dep_i)
+        self.adjoint_nodes[stencil_id] = adjoint_set
+
+    def query_dependencies(self, stencil_id):
+        return self.adjoint_nodes[stencil_id] # stencil_id < self._stencil_id_ticket:
+
 class AsyncContext():
     def __init__(self, num_streams, max_invoked_stencils = 50, blocking = False, concurrent = True, sleep_time = 0.5, graph_record = False, name = None, profiling = False):
         self.stream_pool: List[Optional[cupy.cuda.Stream]] = []
+        self.runtime_graph: RuntimeGraph = RuntimeGraph()
         self.add_streams(num_streams)
         self.last_access_stencil: Dict[str, LastAccessStencil] = dict() # Dict[field_name, LastAccessStencil]
         self.invoked_stencils: Deque[InvokedStencil] = deque()
@@ -60,18 +88,12 @@ class AsyncContext():
         self.concurrent: bool = concurrent # only use root stream, debug only
         self.sleep_time: float = sleep_time # (second) longer sleep saves cpu cycle but lower resolution in timing
         self._graph_record: bool = False
-        self._stencil_id_ticket = 0
         self._profiling: bool = profiling # TODO: deal with concurrent stencil
         if name is None:
             name = uuid4().hex[:5] # get a (almost) unique name
         self.name: str = name
         if graph_record:
             self.graph_record()
-            
-    def get_stencil_id(self):
-        stencil_id = self._stencil_id_ticket
-        self._stencil_id_ticket += 1
-        return stencil_id
 
     def get_node_name(self, node_name: str, stencil_id: int):
         return f'{node_name}_cluster_{stencil_id}'
@@ -223,7 +245,9 @@ class AsyncContext():
             for field in reads.intersection(self.last_access_stencil.keys()):
                 # W -> R
                 dep_set.add(self.last_access_stencil[field].last_write_stencil_id)
-            dep_set = dep_set - {stencil_id, None}
+            dep_set.difference_update({stencil_id, None})
+            self.runtime_graph.add_stencil(stencil_id, dep_set)
+            dep_set = self.runtime_graph.query_dependencies(stencil_id)
             for j in dep_set:
                 self.graph_add_stencil_dependency(stencil_id, j)
         return dep_events
@@ -286,7 +310,7 @@ class AsyncContext():
         has_kernel_dependency_info = stencil.pyext_module.has_dependency_info()
 
         # resolve dependency
-        stencil_id = self.get_stencil_id()
+        stencil_id = self.runtime_graph.get_stencil_id()
         access_info = self.get_field_access_info(stencil_id, stencil, *args, **kwargs)
 
         if self._graph_record:

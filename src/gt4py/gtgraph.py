@@ -26,7 +26,7 @@ import cupy.cuda
 import astor
 from typing import Any, Callable, Dict, Tuple, List, Deque, Optional, Set, Iterable
 from gt4py.stencil_object import StencilObject
-from gt4py import AccessKind
+from gt4py import AccessKind, Boundary, FieldInfo
 from gt4py.storage import Storage
 from gt4py.gtscript import stencil as gtstencil
 from collections import deque
@@ -43,6 +43,7 @@ class InvokedStencil():
     access_info: Dict[str, AccessKind]
     done_event: cupy.cuda.Event
     id: int
+    region: Optional[Tuple[int, int, int, int]] #x_lo, x_hi, y_lo, y_hi INCLUSIVE on both side
 
 @dataclass
 class LastAccessStencil():
@@ -231,14 +232,39 @@ class AsyncContext():
             assert len(row_ind) == num_kernels + 1, "CSR format in dependency data is broken"
         return row_ind, col_ind
 
-    def get_dependencies(self, access_info: Dict[str, AccessKind], stencil_id: int) -> List[cupy.cuda.Event]:
+    def get_stencil_region(self, field_infos: Dict[str, FieldInfo], origin: Tuple[int, int, int], domain: Tuple[int, int, int]):
+        ext_x_lo = 0
+        ext_x_hi = 0
+        ext_y_lo = 0
+        ext_y_hi = 0
+        for field_info in field_infos.values():
+            boundary = field_info.boundary
+            ext_x_lo = max(ext_x_lo, boundary[0][0])
+            ext_x_hi = max(ext_x_hi, boundary[0][1])
+            ext_y_lo = max(ext_y_lo, boundary[1][0])
+            ext_y_hi = max(ext_y_hi, boundary[1][1])
+        x_lo = origin[0] - ext_x_lo
+        x_hi = origin[0] + domain[0] - 1 + ext_x_hi
+        y_lo = origin[1] - ext_y_lo
+        y_hi = origin[1] + domain[1] - 1 + ext_y_hi
+        return x_lo, x_hi, y_lo, y_hi
+
+    def region_overlap(self, region1: Optional[Tuple[int, int, int, int]], region2: Optional[Tuple[int, int, int, int]]) -> bool:
+        if (region1 and region2) is None:
+            return True
+        if region1[1] > region2[0] and region1[0] < region2[1] and region1[3] > region2[2] and region1[2] < region2[3]:
+            return True
+        return False
+
+
+    def get_dependencies(self, access_info: Dict[str, AccessKind], stencil_id: int, stencil_region: Optional[Tuple[int, int, int, int]]) -> List[cupy.cuda.Event]:
         # R -> W, W -> W, W -> R
         dep_events = []
         reads = {k for k in access_info if access_info[k] == AccessKind.READ_ONLY}
         writes = {k for k in access_info if access_info[k] == AccessKind.READ_WRITE}
         dep_set = set()
         for stencil_i in self.invoked_stencils:
-            if not stencil_i.done_event.done:
+            if not stencil_i.done_event.done and self.region_overlap(stencil_region, stencil_i.region):
                 access_info_i = stencil_i.access_info
                 reads_i = {k for k in access_info_i if access_info_i[k] == AccessKind.READ_ONLY}
                 writes_i = {k for k in access_info_i if access_info_i[k] == AccessKind.READ_WRITE}
@@ -275,11 +301,11 @@ class AsyncContext():
                 self.graph_add_stencil_dependency(stencil_id, j)
         return dep_events
 
-    def add_invoked_stencil(self, stencil: StencilObject, access_info: Dict[str, AccessKind], done_event: cupy.cuda.Event, stencil_id: int):
+    def add_invoked_stencil(self, stencil: StencilObject, access_info: Dict[str, AccessKind], done_event: cupy.cuda.Event, stencil_id: int, stencil_region: Optional[Tuple[int, int, int, int]]):
         while len(self.invoked_stencils) >= self.max_invoked_stencils:
             sleep(self.sleep_time) # wait for gpu computation
             self.free_finished_stencils()
-        self.invoked_stencils.append(InvokedStencil(stencil=stencil, access_info=access_info, done_event=done_event, id=stencil_id))
+        self.invoked_stencils.append(InvokedStencil(stencil=stencil, access_info=access_info, done_event=done_event, id=stencil_id, region=stencil_region))
 
     def wait(self):
         if self.concurrent:
@@ -293,9 +319,6 @@ class AsyncContext():
         self.wait()
         for i in range(len(self.stream_pool)):
             self.stream_pool[i] = None
-
-    def __del__(self):
-        self.wait_finish()
 
     def schedule(self, stencil: StencilObject, *args, **kwargs):
         if self.blocking:
@@ -335,10 +358,13 @@ class AsyncContext():
         # resolve dependency
         stencil_id = self.runtime_graph.get_stencil_id()
         access_info = self.get_field_access_info(stencil_id, stencil, *args, **kwargs)
+        stencil_region = None
+        if "origin" in kwargs and "domain" in kwargs:
+            stencil_region = self.get_stencil_region(stencil.field_info, kwargs["origin"], kwargs["domain"])
 
         if self._graph_record:
             self.graph_add_stencil(stencil, access_info, stencil_id)
-        dep_events = self.get_dependencies(access_info, stencil_id)
+        dep_events = self.get_dependencies(access_info, stencil_id, stencil_region)
         self.update_last_access_stencil(stencil_id, access_info)
 
         # count how many streams needed
@@ -366,7 +392,7 @@ class AsyncContext():
         done_events[0].record(stream_pool[0])
 
         # update async_ctx
-        self.add_invoked_stencil(stencil, access_info, done_events[0], stencil_id)
+        self.add_invoked_stencil(stencil, access_info, done_events[0], stencil_id, stencil_region)
 
 def async_stencil(async_context: AsyncContext, *, backend, **gtstencil_kwargs):
     def decorator(func):

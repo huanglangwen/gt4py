@@ -46,14 +46,16 @@ class InvokedStencil():
 
 @dataclass
 class LastAccessStencil():
-    last_read_stencil_id: Optional[int]
+    last_read_stencil_id: List[int]
     last_write_stencil_id: Optional[int]
 
 class RuntimeGraph():
-    def __init__(self):
+    def __init__(self, max_num_edges = 10000):
         self.adjoint_nodes: List[Set[int]] = []
         self.connected_nodes: List[Set[int]] = [] # Transitive closure
         self._stencil_id_ticket = 0
+        self._connected_num_edges = 0
+        self._max_num_edges = max_num_edges
 
     def get_stencil_id(self):
         stencil_id = self._stencil_id_ticket
@@ -66,6 +68,7 @@ class RuntimeGraph():
         connected_set = set(denpendencies)
         connected_set.update(i for j in denpendencies for i in self.connected_nodes[j])
         self.connected_nodes[stencil_id] = connected_set
+        self._connected_num_edges += len(connected_set)
         adjoint_set = set()
         for dep_i in sorted(denpendencies):
             adjoint_set.difference_update(self.connected_nodes[dep_i])
@@ -74,6 +77,19 @@ class RuntimeGraph():
 
     def query_dependencies(self, stencil_id):
         return self.adjoint_nodes[stencil_id] # stencil_id < self._stencil_id_ticket:
+
+    def need_clean(self):
+        return self._connected_num_edges > self._max_num_edges
+
+    def clean_nonactive_stencils(self, active_stencils: Iterable[int]):
+        active_stencils_set = set(active_stencils)
+        for i in range(self._stencil_id_ticket):
+            self._connected_num_edges -= len(self.connected_nodes[i])
+            if i in active_stencils_set:
+                self.connected_nodes[i].intersection_update(active_stencils_set)
+                self._connected_num_edges += len(self.connected_nodes[i])
+            else:
+                self.connected_nodes[i] = set()
 
 class AsyncContext():
     def __init__(self, num_streams, max_invoked_stencils = 50, blocking = False, concurrent = True, sleep_time = 0.5, graph_record = False, name = None, profiling = False):
@@ -197,11 +213,12 @@ class AsyncContext():
     def update_last_access_stencil(self, stencil_id: int, access_info: Dict[str, AccessKind]):
         for field_name, access_kind in access_info.items():
             if field_name not in self.last_access_stencil:
-                self.last_access_stencil[field_name] = LastAccessStencil(None, None)
+                self.last_access_stencil[field_name] = LastAccessStencil([], None)
             if access_kind == AccessKind.READ_ONLY:
-                self.last_access_stencil[field_name].last_read_stencil_id = stencil_id
+                self.last_access_stencil[field_name].last_read_stencil_id.append(stencil_id)
             if access_kind == AccessKind.READ_WRITE:
                 self.last_access_stencil[field_name].last_write_stencil_id = stencil_id
+                self.last_access_stencil[field_name].last_read_stencil_id = [stencil_id]
 
     def get_kernel_dependencies(self, stencil: StencilObject) -> Tuple[List[int], List[int]]: #(row_ind, col_ind)
         assert hasattr(stencil, "pyext_module")
@@ -239,13 +256,19 @@ class AsyncContext():
             # In case some stencils have finished but still have influence on dependency
             for field in writes.intersection(self.last_access_stencil.keys()):
                 # R -> W
-                dep_set.add(self.last_access_stencil[field].last_read_stencil_id)
+                dep_set.update(self.last_access_stencil[field].last_read_stencil_id)
                 # W -> W
                 dep_set.add(self.last_access_stencil[field].last_write_stencil_id)
             for field in reads.intersection(self.last_access_stencil.keys()):
                 # W -> R
                 dep_set.add(self.last_access_stencil[field].last_write_stencil_id)
             dep_set.difference_update({stencil_id, None})
+            if self.runtime_graph.need_clean():
+                active_stencil_set = set(stencil.id for stencil in self.invoked_stencils)
+                active_stencil_set.update(i for las in self.last_access_stencil.values() for i in las.last_read_stencil_id)
+                active_stencil_set.update(las.last_write_stencil_id for las in self.last_access_stencil.values())
+                active_stencil_set.discard(None)
+                self.runtime_graph.clean_nonactive_stencils(active_stencil_set)
             self.runtime_graph.add_stencil(stencil_id, dep_set)
             dep_set = self.runtime_graph.query_dependencies(stencil_id)
             for j in dep_set:
